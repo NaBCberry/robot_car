@@ -74,6 +74,21 @@ class StateMachineTests(unittest.TestCase):
         self.assertFalse(target.enable)
         self.assertEqual(target.target_speed_mm_s, 0)
 
+    def test_capture_servo_mode_uses_zero_motion_target(self):
+        config = dict(CONFIG, capture={"enabled": True, "control_mode": "MCU_TARGET_SERVO"})
+        machine = VehicleStateMachine(config)
+        machine.start()
+        target_event = VisionEvent(1000, "steelball", "BALL_TARGET", 0.9,
+                                   {"track_id": 1, "bearing_mdeg": 0, "range_mm": 300},
+                                   1, 150, 640, 480)
+        machine.handle_event(target_event, 1010)
+        self.assertEqual(machine.state, VehicleState.CAPTURE_SERVO)
+        target = machine.target(1020)
+        self.assertTrue(target.enable)
+        self.assertEqual(target.target_speed_mm_s, 0)
+        machine.handle_event(event("CAPTURE_CANCEL", 1030), 1030)
+        self.assertEqual(machine.state, VehicleState.LINE_FOLLOW)
+
 
 class StabilizerTests(unittest.TestCase):
     def test_requires_consecutive_observations(self):

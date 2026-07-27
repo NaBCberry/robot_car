@@ -1,7 +1,9 @@
 import struct
+import time
 import unittest
 
 from robot_car.decision.motion_target import MotionTarget
+from robot_car.decision.capture_target import CaptureTarget
 from robot_car.protocol.framing import (CRC, HEADER, FrameDecoder, ProtocolError, crc16_ccitt,
                                         decode_packet, encode_frame)
 from robot_car.protocol.messages import (MessageType, ProtocolMessage, pack_ack, unpack_ack,
@@ -66,6 +68,34 @@ class ProtocolTests(unittest.TestCase):
             pack_capture_target(1, 1, 0, 0, 1001, 0, 200)
         with self.assertRaises(ValueError):
             unpack_capture_target(b"\x00")
+
+    def test_gateway_capture_target_obeys_safety_gate(self):
+        transport = FakeTransport()
+        gateway = VehicleGateway(transport, {
+            "control_enabled": True,
+            "default_valid_for_ms": 200,
+            "capture": {"enabled": True, "control_mode": "MCU_TARGET_SERVO"},
+        })
+        gateway.open()
+        now_ms = time.monotonic_ns() // 1_000_000
+        gateway.send_capture_target(CaptureTarget(now_ms, 17, 12000, 680, 940, 35, 200, True, True))
+        command = FrameDecoder().feed(transport.sent[-1])[0]
+        self.assertEqual(command.message_type, MessageType.CMD_CAPTURE_TARGET)
+        self.assertTrue(unpack_capture_target(command.payload)["target_valid"])
+        gateway.close()
+
+    def test_gateway_capture_target_expires_to_safe_frame(self):
+        transport = FakeTransport()
+        gateway = VehicleGateway(transport, {
+            "control_enabled": True,
+            "default_valid_for_ms": 200,
+            "capture": {"enabled": True, "control_mode": "MCU_TARGET_SERVO"},
+        })
+        gateway.open()
+        gateway.send_capture_target(CaptureTarget(1, 17, 12000, 680, 940, 35, 200, True, True))
+        command = FrameDecoder().feed(transport.sent[-1])[0]
+        self.assertFalse(unpack_capture_target(command.payload)["target_valid"])
+        gateway.close()
 
 
 if __name__ == "__main__":

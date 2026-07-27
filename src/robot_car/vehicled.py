@@ -10,6 +10,7 @@ import time
 from typing import Any, Dict
 
 from robot_car.config import ensure_runtime_dirs, load_config
+from robot_car.decision.control_arbiter import ControlArbiter
 from robot_car.decision.state_machine import VehicleStateMachine, monotonic_ms
 from robot_car.ipc.vision_socket import VisionEventSubscriber
 from robot_car.observability.logging import configure_logging
@@ -43,6 +44,7 @@ class VehicleDaemon:
         self.transport = transport
         self.gateway = VehicleGateway(transport, config["vehicle"])
         self.state_machine = VehicleStateMachine(config["vehicle"])
+        self.control_arbiter = ControlArbiter(config["vehicle"])
         self.subscriber = VisionEventSubscriber(config["runtime"]["vision_socket"])
         self.stop_event = threading.Event()
         self.is_fake = isinstance(transport, FakeTransport)
@@ -61,6 +63,7 @@ class VehicleDaemon:
                 now_ms = monotonic_ms()
                 if event is not None:
                     self.state_machine.handle_event(event, now_ms)
+                    self.control_arbiter.handle_event(event, now_ms)
                 try:
                     self.gateway.poll(0.0)
                 except Exception:
@@ -71,8 +74,16 @@ class VehicleDaemon:
                                                  str(telemetry.get("fault", "")), now_ms)
                 now = time.monotonic()
                 if now >= next_send:
+                    capture_event = self.control_arbiter.consume_capture_event()
+                    if capture_event is not None:
+                        self.gateway.send_capture_event(capture_event)
                     self.gateway.send_heartbeat()
-                    self.gateway.send_motion(self.state_machine.target(now_ms))
+                    motion, capture_target = self.control_arbiter.select(
+                        now_ms, self.state_machine.target(now_ms))
+                    if motion is not None:
+                        self.gateway.send_motion(motion)
+                    elif capture_target is not None:
+                        self.gateway.send_capture_target(capture_target)
                     next_send = now + interval
         finally:
             self.subscriber.close()

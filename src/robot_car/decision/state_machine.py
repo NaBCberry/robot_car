@@ -17,6 +17,7 @@ class VehicleState(str, Enum):
     IDLE = "IDLE"
     LINE_FOLLOW = "LINE_FOLLOW"
     VISION_ASSIST = "VISION_ASSIST"
+    CAPTURE_SERVO = "CAPTURE_SERVO"
     FAILSAFE = "FAILSAFE"
     E_STOP = "E_STOP"
     FAULT = "FAULT"
@@ -55,6 +56,11 @@ class VehicleStateMachine:
             self.state = VehicleState.VISION_ASSIST
         elif action == "INTERSECTION":
             self.state = VehicleState.VISION_ASSIST
+        elif (event.event_type == "BALL_TARGET" and self.config.get("capture", {}).get("enabled")
+              and self.config.get("capture", {}).get("control_mode") == "MCU_TARGET_SERVO"):
+            self.state = VehicleState.CAPTURE_SERVO
+        elif event.event_type == "CAPTURE_CANCEL" and self.state == VehicleState.CAPTURE_SERVO:
+            self.start()
 
     def update_safety(self, link_ok: bool, estop: bool = False, fault: str = "", now_ms: Optional[int] = None) -> None:
         now = monotonic_ms() if now_ms is None else now_ms
@@ -89,6 +95,8 @@ class VehicleStateMachine:
             return MotionTarget(mode=self.state.value, enable=False, valid_for_ms=valid_for)
         if now < self.stop_until_ms:
             return MotionTarget(mode="VISION_ASSIST", enable=False, valid_for_ms=valid_for)
+        if self.state == VehicleState.CAPTURE_SERVO:
+            return MotionTarget(mode="CAPTURE_SERVO", enable=control_enabled, valid_for_ms=valid_for)
         speed = int(self.config.get("line_follow_speed_mm_s", self.config.get("default_speed_mm_s", 0)))
         limit = int(self.config.get("speed_limit_mm_s", 0))
         if self.speed_limit_override is not None:
