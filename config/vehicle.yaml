@@ -11,3 +11,16 @@ vehicle:
   link_timeout_ms: 500
   stop_hold_ms: 1000
   slow_speed_limit_mm_s: 100
+  capture:
+    # Enables capture-target semantics only; it does not enable real transport or car control.
+    enabled: false
+    control_mode: RDK_MOTION_TARGET
+    target_timeout_ms: 200
+    feedback:
+      enabled: false
+      type: none             # none / hall / current / switch / vision
+      timeout_ms: 800
+    no_feedback_policy:
+      result: CAPTURE_ATTEMPTED
+      post_capture_action: HOLD
+      magnet_max_hold_ms: 3000

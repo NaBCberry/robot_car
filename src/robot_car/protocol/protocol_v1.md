@@ -26,6 +26,7 @@ matched by the ACK payload's original sequence.
 | `0x01` | CMD_MOTION | `mode:u8, enable:u8, speed_mm_s:i32, steering_mdeg:i32, speed_limit_mm_s:u32, valid_for_ms:u16` |
 | `0x02` | CMD_EVENT | UTF-8 JSON object containing `event_type`, `payload`, `valid_for_ms` |
 | `0x03` | HEARTBEAT | `sender_monotonic_ms:u32, valid_for_ms:u16` |
+| `0x04` | CMD_CAPTURE_TARGET | fixed binary capture target described below |
 | `0x10` | TELEMETRY | UTF-8 JSON object; see below |
 | `0x11` | ACK | `acknowledged_sequence:u16, status:u8` (`0` means accepted) |
 | `0x12` | FAULT | UTF-8 JSON object containing fault `code`, `severity`, `detail` |
@@ -40,6 +41,32 @@ Recommended TELEMETRY keys are `timestamp_ms`, `motion_sequence`,
 `speed_left_mm_s`, `speed_right_mm_s`, `line_error`, `imu_yaw_mdeg`,
 `battery_mv`, `estop`, and `faults`. Unknown JSON keys are ignored for forward
 compatibility.
+
+## CMD_CAPTURE_TARGET
+
+This message is for `MCU_TARGET_SERVO`: RDK reports where a steel ball is
+relative to the **electromagnet capture point**; MSPM0 owns the local approach,
+alignment, motor control, and magnet decision. It is not a motor PWM command.
+
+| Field | Size | Meaning |
+|---|---:|---|
+| flags | u8 | bit 0 `target_valid`, bit 1 `capture_armed`; other bits zero |
+| reserved | u8 | always zero |
+| track_id | u16 | RDK target tracker identity |
+| bearing_mdeg | i32 | target bearing from capture-point forward axis; sign must be calibrated jointly |
+| range_mm | i32 | ground-plane distance to capture point |
+| confidence_permille | u16 | `0`–`1000` visual confidence |
+| measurement_age_ms | u16 | capture timestamp to transmit timestamp age |
+| valid_for_ms | u16 | maximum time MSPM0 may use this target |
+
+MSPM0 must discard invalid, stale, out-of-range, low-confidence, or expired
+targets, and must safe-stop the capture motion when no fresh valid target is
+available. `capture_armed` grants permission to attempt capture; it does not
+mean the electromagnet must report success.
+
+Capture result telemetry uses `capture_state` with `CAPTURED`, `CAPTURE_FAILED`,
+or `CAPTURE_ATTEMPTED`. `CAPTURE_ATTEMPTED` is required when capture feedback is
+disabled: it means the magnet command was issued but the result is unknown.
 
 ## CAN mapping
 

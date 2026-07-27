@@ -5,7 +5,7 @@ from robot_car.decision.motion_target import MotionTarget
 from robot_car.protocol.framing import (CRC, HEADER, FrameDecoder, ProtocolError, crc16_ccitt,
                                         decode_packet, encode_frame)
 from robot_car.protocol.messages import (MessageType, ProtocolMessage, pack_ack, unpack_ack,
-                                         unpack_motion)
+                                         pack_capture_target, unpack_capture_target, unpack_motion)
 from robot_car.vehicle_link.fake_transport import FakeTransport
 from robot_car.vehicle_link.gateway import VehicleGateway
 
@@ -46,6 +46,26 @@ class ProtocolTests(unittest.TestCase):
 
     def test_ack_payload(self):
         self.assertEqual(unpack_ack(pack_ack(65535, 2)), {"acknowledged_sequence": 65535, "status": 2})
+
+    def test_capture_target_round_trip(self):
+        payload = pack_capture_target(0x03, 17, -12000, 680, 940, 35, 200)
+        self.assertEqual(unpack_capture_target(payload), {
+            "target_valid": True,
+            "capture_armed": True,
+            "flags": 3,
+            "track_id": 17,
+            "bearing_mdeg": -12000,
+            "range_mm": 680,
+            "confidence_permille": 940,
+            "measurement_age_ms": 35,
+            "valid_for_ms": 200,
+        })
+
+    def test_capture_target_rejects_invalid_values(self):
+        with self.assertRaises(ValueError):
+            pack_capture_target(1, 1, 0, 0, 1001, 0, 200)
+        with self.assertRaises(ValueError):
+            unpack_capture_target(b"\x00")
 
 
 if __name__ == "__main__":
