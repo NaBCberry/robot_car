@@ -22,6 +22,8 @@ robot_car/
 ├── requirements.txt                  # 基础 Python 依赖；硬件依赖仅作注释说明
 ├── robot_car/
 │   └── __init__.py                    # 仓库根目录运行时的 src-layout 导入 shim
+├── docs/
+│   └── vision_to_motion_flow.md       # 视觉事件到 MSPM0 运动目标的流程图和时序图
 ├── config/                            # 所有可部署参数，硬件路径不写死在代码中
 │   ├── base.yaml                      # 运行数据根目录、日志级别、UDS 和调试 Web 配置
 │   ├── camera.yaml                    # 摄像头启停、设备、分辨率、帧率和像素格式
@@ -104,6 +106,9 @@ robot_car/
 经 `ipc` 交给 `vehicled`；`vehicled` 通过 `decision` 生成高层目标，再交给
 `vehicle_link` 和 `protocol`。`decision` 不导入任何具体模型 adapter，视觉
 插件也不能访问车辆传输层。
+
+视觉到运动的逐步数据变化、文件路径、时序和安全分支见
+[`docs/vision_to_motion_flow.md`](docs/vision_to_motion_flow.md)。
 
 ## 安全默认值
 
