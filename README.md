@@ -13,6 +13,98 @@ camera -> visiond -> VisionEvent/Unix Socket -> vehicled -> protocol v1 -> MSPM0
 转向、限速和有效期，不发送左右电机 PWM。运行数据全部位于
 `/userdata/robot-car`，不会写进 Git 项目。
 
+## 仓库目录与文件职责
+
+```text
+robot_car/
+├── .gitignore                         # 忽略 Python 缓存和本地测试缓存
+├── README.md                          # 项目架构、安全约束、运行和联调说明
+├── requirements.txt                  # 基础 Python 依赖；硬件依赖仅作注释说明
+├── robot_car/
+│   └── __init__.py                    # 仓库根目录运行时的 src-layout 导入 shim
+├── config/                            # 所有可部署参数，硬件路径不写死在代码中
+│   ├── base.yaml                      # 运行数据根目录、日志级别、UDS 和调试 Web 配置
+│   ├── camera.yaml                    # 摄像头启停、设备、分辨率、帧率和像素格式
+│   ├── vision.yaml                    # 视觉插件列表、频率、优先级、BPU 和确认策略
+│   ├── vehicle.yaml                   # 状态机、车控总开关、速度、心跳和超时参数
+│   └── transport.yaml                 # Fake/UART/CAN 类型、端口、波特率和 CAN ID
+├── deploy/
+│   └── systemd/                       # 仅供人工部署的 systemd 模板，不自动安装
+│       ├── robot-vehicle.service      # vehicled 服务模板，要求先启动
+│       └── robot-vision.service       # visiond 服务模板，依赖 vehicle 服务
+├── scripts/                           # 日常启动和只读诊断入口
+│   ├── diagnose_hardware.sh           # 只读列举 Python、视频、串口和 CAN 候选资源
+│   ├── run_vehicled.sh                # 设置工作目录/PYTHONPATH 后启动 vehicled
+│   └── run_visiond.sh                 # 设置工作目录/PYTHONPATH 后启动 visiond
+├── src/
+│   └── robot_car/                     # 应用主 Python 包
+│       ├── __init__.py                # 包版本和包级说明
+│       ├── config.py                  # YAML 合并、关键参数校验和运行目录创建
+│       ├── visiond.py                 # 单摄像头所有者、插件调度、事件发布和调试 API
+│       ├── vehicled.py                # 视觉订阅、状态机、心跳和 MSPM0 唯一通信出口
+│       ├── camera/                    # 摄像头采集层
+│       │   ├── __init__.py            # camera 子包声明
+│       │   ├── capture.py             # 唯一打开摄像头的实现，使用容量为 1 的最新帧队列
+│       │   └── frame.py               # CameraFrame 帧号、时间戳、图像及尺寸结构
+│       ├── perception/                # 与具体车控和通信解耦的视觉插件层
+│       │   ├── __init__.py            # 导出 VisionEvent 和 VisionPlugin 公共接口
+│       │   ├── plugin.py              # initialize/process/health/close 抽象插件协议
+│       │   ├── plugin_registry.py     # 根据 vision.yaml 中的 type 创建插件
+│       │   ├── events.py              # 跨插件统一 VisionEvent 数据结构和 TTL 判断
+│       │   ├── scheduler.py           # 独立限频、并发执行、超时跳帧和故障退避
+│       │   ├── stabilizer.py          # 连续多帧确认及中断后重新计数
+│       │   ├── yolo_adapter.py        # 复用现有 YOLO26Detect，不打开摄像头
+│       │   ├── ocr_adapter.py         # 复用现有 PaddleOCR，不打开摄像头
+│       │   └── placeholders.py        # QR、颜色、车道线、分割和姿态插件占位实现
+│       ├── decision/                  # 只依赖标准视觉事件的高层决策层
+│       │   ├── __init__.py            # decision 子包声明
+│       │   ├── motion_target.py       # 模式、速度、转向、限速和有效期目标结构
+│       │   ├── rules.py               # STOP/SLOW_DOWN/OCR 等事件到行为的规则映射
+│       │   └── state_machine.py       # BOOT 到 FAULT 的状态迁移和失联安全逻辑
+│       ├── ipc/                       # visiond 与 vehicled 的本机进程通信层
+│       │   ├── __init__.py            # ipc 子包声明
+│       │   ├── schemas.py             # IPC schema 版本、事件封装和输入校验
+│       │   └── vision_socket.py       # UDS JSON-lines 发布、订阅、扇出和自动重连
+│       ├── protocol/                  # RDK 与 MSPM0 共用的协议语义
+│       │   ├── __init__.py            # 导出协议编解码公共 API
+│       │   ├── messages.py            # 消息枚举及 motion、ACK、JSON payload 编解码
+│       │   ├── framing.py             # SLIP 风格分帧、CRC-16 和增量解码器
+│       │   └── protocol_v1.md         # 固件与 Python 端共同遵循的字节级协议文档
+│       ├── vehicle_link/              # 真实硬件与 FakeTransport 的统一通信层
+│       │   ├── __init__.py            # vehicle_link 子包声明
+│       │   ├── transport_base.py      # open/send/receive/close 抽象传输接口
+│       │   ├── fake_transport.py      # 内存记录和遥测注入，用于无硬件测试
+│       │   ├── uart_transport.py      # 显式配置后才加载 pyserial 和打开串口
+│       │   ├── can_transport.py       # 显式配置后才加载 python-can，处理 CAN 分段
+│       │   ├── gateway.py             # 序列号、协议帧、ACK、心跳和安全目标发送
+│       │   ├── telemetry.py           # 最近一次 MSPM0 遥测的线程安全缓存
+│       │   └── watchdog.py            # 基于单调时钟的链路接收超时判断
+│       ├── web/                       # 与车控无依赖的只读调试服务
+│       │   ├── __init__.py            # web 子包声明
+│       │   ├── server.py              # /api/status、/api/results、/api/metrics
+│       │   └── overlay.py             # 预留的监控画面叠加接口，不参与决策
+│       └── observability/             # 日志、指标和可选事件记录
+│           ├── __init__.py            # observability 子包声明
+│           ├── logging.py             # 控制台和运行数据目录文件日志初始化
+│           ├── metrics.py             # 线程安全的轻量计数器/指标快照
+│           └── recorder.py            # 可选 JSON-lines 视觉事件记录器
+├── tests/                             # 无摄像头和无 MSPM0 可运行的自动化测试
+│   ├── test_protocol.py               # CRC、长度、未知类型、转义、sequence 和 ACK
+│   ├── test_state_machine.py          # 状态迁移、安全门控、超时和多帧确认
+│   └── test_vision_ipc.py             # UDS 连接、事件传递、断线和重连
+└── tools/
+    └── replay_recording.py            # 将 JSON-lines 录像事件重放到独立 UDS
+```
+
+仓库外的 `/userdata/robot-car` 是运行数据目录：`logs/` 保存进程日志，
+`recordings/` 保存可选录像或事件记录，`runtime/` 保存 Unix Socket、PID 等
+瞬态文件，`calibration/` 保存相机和车辆标定数据。这些内容不进入 Git。
+
+源码依赖方向保持单向：`visiond` 通过 `camera` 和 `perception` 生成事件，
+经 `ipc` 交给 `vehicled`；`vehicled` 通过 `decision` 生成高层目标，再交给
+`vehicle_link` 和 `protocol`。`decision` 不导入任何具体模型 adapter，视觉
+插件也不能访问车辆传输层。
+
 ## 安全默认值
 
 - `camera.enabled: false` 且设备名为空，不会默认打开摄像头。
