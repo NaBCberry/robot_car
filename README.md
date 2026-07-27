@@ -23,7 +23,8 @@ robot_car/
 ├── robot_car/
 │   └── __init__.py                    # 仓库根目录运行时的 src-layout 导入 shim
 ├── docs/
-│   └── vision_to_motion_flow.md       # 视觉事件到 MSPM0 运动目标的流程图和时序图
+│   ├── vision_to_motion_flow.md       # OCR/通用视觉事件到 MSPM0 运动目标的流程图和时序图
+│   └── steelball_capture_control.md   # 钢球双控制链路、协议分层、标定和安全语义
 ├── config/                            # 所有可部署参数，硬件路径不写死在代码中
 │   ├── base.yaml                      # 运行数据根目录、日志级别、UDS 和调试 Web 配置
 │   ├── camera.yaml                    # 摄像头启停、设备、分辨率、帧率和像素格式
@@ -57,10 +58,14 @@ robot_car/
 │       │   ├── stabilizer.py          # 连续多帧确认及中断后重新计数
 │       │   ├── yolo_adapter.py        # 复用现有 YOLO26Detect，不打开摄像头
 │       │   ├── ocr_adapter.py         # 复用现有 PaddleOCR，不打开摄像头
+│       │   ├── steelball_adapter.py   # 复用 YOLO26Seg 检测钢球，并生成捕获目标事件
+│       │   ├── steelball_geometry.py  # 图像到电磁铁捕获点相对坐标的单应性解算
 │       │   └── placeholders.py        # QR、颜色、车道线、分割和姿态插件占位实现
 │       ├── decision/                  # 只依赖标准视觉事件的高层决策层
 │       │   ├── __init__.py            # decision 子包声明
 │       │   ├── motion_target.py       # 模式、速度、转向、限速和有效期目标结构
+│       │   ├── capture_target.py      # 钢球的相对角度/距离目标及目标失效安全值
+│       │   ├── control_arbiter.py     # 在普通运动与 MCU 捕获伺服链路间互斥仲裁
 │       │   ├── rules.py               # STOP/SLOW_DOWN/OCR 等事件到行为的规则映射
 │       │   └── state_machine.py       # BOOT 到 FAULT 的状态迁移和失联安全逻辑
 │       ├── ipc/                       # visiond 与 vehicled 的本机进程通信层
@@ -91,8 +96,11 @@ robot_car/
 │           ├── metrics.py             # 线程安全的轻量计数器/指标快照
 │           └── recorder.py            # 可选 JSON-lines 视觉事件记录器
 ├── tests/                             # 无摄像头和无 MSPM0 可运行的自动化测试
-│   ├── test_protocol.py               # CRC、长度、未知类型、转义、sequence 和 ACK
-│   ├── test_state_machine.py          # 状态迁移、安全门控、超时和多帧确认
+│   ├── test_protocol.py               # CRC、协议字段、ACK 及捕获目标安全门控
+│   ├── test_state_machine.py          # 状态迁移、安全门控、超时和捕获伺服状态
+│   ├── test_control_arbiter.py        # 两条控制链路互斥、目标过期及反馈语义
+│   ├── test_steelball_geometry.py     # 钢球图像坐标到捕获点坐标的解算
+│   ├── test_vehicled_capture.py       # 守护进程仅发送捕获链路，不发送有效普通运动
 │   └── test_vision_ipc.py             # UDS 连接、事件传递、断线和重连
 └── tools/
     └── replay_recording.py            # 将 JSON-lines 录像事件重放到独立 UDS
@@ -109,12 +117,17 @@ robot_car/
 
 视觉到运动的逐步数据变化、文件路径、时序和安全分支见
 [`docs/vision_to_motion_flow.md`](docs/vision_to_motion_flow.md)。
+钢球捕获的专用控制过程、两条链路的比较及电磁铁无反馈处理见
+[`docs/steelball_capture_control.md`](docs/steelball_capture_control.md)。
 
 ## 安全默认值
 
 - `camera.enabled: false` 且设备名为空，不会默认打开摄像头。
 - `transport.enabled: false`，UART 设备与 CAN 通道/ID 均为空。
 - `vehicle.control_enabled: false`，速度和限速均为零。
+- `vehicle.capture.enabled: false`；即使启用钢球插件，也不会下发有效捕获目标。
+- `vehicle.capture.feedback.enabled: false`；未接入霍尔/电流/开关/视觉反馈时，只能
+  上报 `CAPTURE_ATTEMPTED`，绝不把电磁铁动作描述为捕获成功。
 - 启动和正常停止都会通过已选传输发送一次禁用/零速目标；FakeTransport
   只在内存中记录。
 - 配置错误、模型缺失、摄像头失败或真实链路超时不会产生有效运动目标。
@@ -166,6 +179,11 @@ python3 -m unittest discover -s tests -v
 YOLO adapter 复用现有 `YOLO26Detect.predict(frame)`；OCR adapter 复用现有
 `PaddleOCR.predict(frame)`。两者都延迟导入板端 BPU 运行库，初始化失败会被
 隔离并清晰记录，不会自行打开摄像头。
+
+钢球插件复用相邻 `ultralytics_yolo26/runtime/python/yolo26_seg.py` 的
+`YOLO26Seg` 和其中配置的模型文件，只使用 `visiond` 提供的 `CameraFrame`；
+它不导入或运行 `steelball_web.py`，因此不会额外打开摄像头。要生成供 MCU
+伺服使用的 `BALL_TARGET`，还必须填写并验证图像到电磁铁捕获点的标定矩阵。
 
 ## 视觉插件扩展
 

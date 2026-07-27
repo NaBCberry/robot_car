@@ -31,8 +31,8 @@ matched by the ACK payload's original sequence.
 | `0x11` | ACK | `acknowledged_sequence:u16, status:u8` (`0` means accepted) |
 | `0x12` | FAULT | UTF-8 JSON object containing fault `code`, `severity`, `detail` |
 
-Motion mode values are `0 DISABLED`, `1 IDLE`, `2 LINE_FOLLOW`, and
-`3 VISION_ASSIST`. `enable=0` always means PWM must be disabled and speed must
+Motion mode values are `0 DISABLED`, `1 IDLE`, `2 LINE_FOLLOW`, `3 VISION_ASSIST`,
+and `4 CAPTURE_SERVO`. `enable=0` always means PWM must be disabled and speed must
 be treated as zero regardless of other fields. Every command has an explicit
 validity window. MSPM0 must enter safe stop when the newest valid motion target
 or RDK heartbeat expires; hardware E-stop always has priority.
