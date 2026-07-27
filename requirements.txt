@@ -1,0 +1,4 @@
+PyYAML>=5.4
+
+# Optional hardware/runtime dependencies are intentionally not installed here:
+# opencv-python (normally supplied by the RDK image), pyserial, python-can.

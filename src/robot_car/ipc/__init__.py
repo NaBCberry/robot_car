@@ -1,0 +1,1 @@
+"""Local vision event IPC."""

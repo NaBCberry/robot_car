@@ -1,0 +1,95 @@
+"""YAML configuration loading with fail-safe defaults."""
+
+from __future__ import annotations
+
+import copy
+from pathlib import Path
+from typing import Any, Dict
+
+import yaml
+
+
+SAFE_DEFAULTS: Dict[str, Any] = {
+    "runtime": {
+        "root": "/userdata/robot-car",
+        "log_level": "INFO",
+        "vision_socket": "/userdata/robot-car/runtime/vision.sock",
+    },
+    "web": {"enabled": False, "host": "127.0.0.1", "port": 8090},
+    "camera": {"enabled": False, "device": "", "width": 640, "height": 480, "fps": 10},
+    "vision": {"confirmation_frames": 3, "default_ttl_ms": 150, "plugins": []},
+    "vehicle": {
+        "control_enabled": False,
+        "initial_mode": "IDLE",
+        "default_speed_mm_s": 0,
+        "speed_limit_mm_s": 0,
+        "default_valid_for_ms": 200,
+        "heartbeat_hz": 20,
+        "vision_timeout_ms": 500,
+        "link_timeout_ms": 500,
+    },
+    "transport": {
+        "enabled": False,
+        "type": "fake",
+        "uart": {"device": ""},
+        "can": {"interface": "", "channel": "", "ids": {}},
+    },
+}
+
+
+def _merge(base: Dict[str, Any], update: Dict[str, Any]) -> Dict[str, Any]:
+    for key, value in update.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            _merge(base[key], value)
+        else:
+            base[key] = value
+    return base
+
+
+def load_config(config_dir: str | Path) -> Dict[str, Any]:
+    """Load all known files, retaining safe defaults on missing files."""
+    result = copy.deepcopy(SAFE_DEFAULTS)
+    directory = Path(config_dir)
+    for name in ("base.yaml", "camera.yaml", "vision.yaml", "vehicle.yaml", "transport.yaml"):
+        path = directory / name
+        if not path.exists():
+            continue
+        with path.open("r", encoding="utf-8") as stream:
+            document = yaml.safe_load(stream) or {}
+        if not isinstance(document, dict):
+            raise ValueError(f"configuration root must be a mapping: {path}")
+        _merge(result, document)
+    _validate_safe(result)
+    return result
+
+
+def _validate_safe(config: Dict[str, Any]) -> None:
+    transport = config.get("transport", {})
+    vehicle = config.get("vehicle", {})
+    camera = config.get("camera", {})
+    for label, value in (("transport.enabled", transport.get("enabled")),
+                         ("vehicle.control_enabled", vehicle.get("control_enabled")),
+                         ("camera.enabled", camera.get("enabled"))):
+        if not isinstance(value, bool):
+            raise ValueError(f"{label} must be a YAML boolean")
+    if transport.get("enabled"):
+        kind = transport.get("type")
+        if kind == "uart" and not transport.get("uart", {}).get("device"):
+            raise ValueError("enabled UART transport requires transport.uart.device")
+        if kind == "can" and not transport.get("can", {}).get("channel"):
+            raise ValueError("enabled CAN transport requires transport.can.channel")
+    validity = int(vehicle.get("default_valid_for_ms", 0))
+    if not 0 < validity <= 0xFFFF:
+        raise ValueError("vehicle.default_valid_for_ms must fit uint16 and be positive")
+    if float(vehicle.get("heartbeat_hz", 0)) <= 0:
+        raise ValueError("vehicle.heartbeat_hz must be positive")
+    if int(vehicle.get("speed_limit_mm_s", 0)) < 0:
+        raise ValueError("vehicle.speed_limit_mm_s cannot be negative")
+
+
+def ensure_runtime_dirs(config: Dict[str, Any]) -> Dict[str, Path]:
+    root = Path(config["runtime"]["root"])
+    paths = {name: root / name for name in ("logs", "recordings", "runtime", "calibration")}
+    for path in paths.values():
+        path.mkdir(parents=True, exist_ok=True)
+    return paths

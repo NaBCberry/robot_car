@@ -1,0 +1,10 @@
+camera:
+  # Safety default: no real device is opened until explicitly enabled.
+  enabled: false
+  device: ""
+  width: 1280
+  height: 720
+  fps: 30
+  pixel_format: MJPG
+  test_image: ""
+  reconnect_delay_ms: 1000

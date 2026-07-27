@@ -1,0 +1,9 @@
+runtime:
+  root: /userdata/robot-car
+  log_level: INFO
+  vision_socket: /userdata/robot-car/runtime/vision.sock
+
+web:
+  enabled: true
+  host: 127.0.0.1
+  port: 8090

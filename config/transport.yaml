@@ -1,0 +1,14 @@
+transport:
+  enabled: false
+  type: fake
+  uart:
+    device: ""
+    baudrate: 115200
+    read_timeout_ms: 20
+  can:
+    interface: ""
+    channel: ""
+    bitrate: 500000
+    ids:
+      command: null
+      telemetry: null

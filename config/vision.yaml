@@ -1,0 +1,37 @@
+vision:
+  confirmation_frames: 3
+  default_ttl_ms: 150
+  health_interval_ms: 100
+  latest_frame_queue_size: 1
+  plugins:
+    - name: yolo
+      enabled: false
+      type: yolo_detector
+      interval_ms: 100
+      priority: 100
+      max_processing_ms: 90
+      bpu_cores: [0]
+      config:
+        model_path: ""
+        classes_num: 80
+        score_threshold: 0.25
+        nms_threshold: 0.65
+        class_names: []
+    - name: ocr
+      enabled: false
+      type: paddle_ocr
+      interval_ms: 500
+      priority: 20
+      max_processing_ms: 450
+      trigger_events: [SIGN_TEXT_REGION]
+      bpu_cores: [1]
+      config:
+        detection_model_path: ""
+        recognition_model_path: ""
+        detection_threshold: 0.7
+        minimum_area: 300
+    - {name: qr_code, enabled: false, type: qr_code, interval_ms: 200, priority: 40, max_processing_ms: 150, config: {}}
+    - {name: color_marker, enabled: false, type: color_marker, interval_ms: 100, priority: 50, max_processing_ms: 80, config: {}}
+    - {name: lane_vision, enabled: false, type: lane_vision, interval_ms: 50, priority: 90, max_processing_ms: 40, config: {}}
+    - {name: segmentation, enabled: false, type: segmentation, interval_ms: 100, priority: 60, max_processing_ms: 90, config: {}}
+    - {name: pose_estimation, enabled: false, type: pose_estimation, interval_ms: 200, priority: 30, max_processing_ms: 180, config: {}}

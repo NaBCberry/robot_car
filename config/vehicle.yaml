@@ -1,0 +1,13 @@
+vehicle:
+  # This gate is independent of transport.enabled and defaults safe.
+  control_enabled: false
+  initial_mode: IDLE
+  default_speed_mm_s: 0
+  line_follow_speed_mm_s: 0
+  speed_limit_mm_s: 0
+  default_valid_for_ms: 200
+  heartbeat_hz: 20
+  vision_timeout_ms: 500
+  link_timeout_ms: 500
+  stop_hold_ms: 1000
+  slow_speed_limit_mm_s: 100

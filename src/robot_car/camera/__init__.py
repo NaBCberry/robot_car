@@ -1,0 +1,1 @@
+"""Single-owner camera capture."""

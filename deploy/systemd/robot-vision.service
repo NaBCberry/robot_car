@@ -1,0 +1,17 @@
+[Unit]
+Description=RDK Robot Vision Service
+After=robot-vehicle.service
+Requires=robot-vehicle.service
+
+[Service]
+Type=simple
+# Set User= to an unprivileged deployment account with video permissions.
+WorkingDirectory=/userdata/rdkstudio/projects/robot_car
+Environment=PYTHONPATH=/userdata/rdkstudio/projects:/userdata/rdkstudio/projects/robot_car/src
+Environment=ROBOT_CAR_RUNTIME=/userdata/robot-car/runtime
+ExecStart=/usr/bin/python3 -m robot_car.visiond --config-dir config
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
