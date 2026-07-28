@@ -5,7 +5,7 @@ transport:
   heartbeat:
     enabled: true
   uart:
-    device: ""
+    device: "/dev/ttyS1"
     baudrate: 115200
     read_timeout_ms: 20
   can:

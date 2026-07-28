@@ -39,8 +39,8 @@ vision:
       bpu_cores: [0]
       config:
         # Set model_type to det after supplying a matching YOLO26 steel-ball detection .bin.
-        model_path: ""
-        model_type: seg
+        model_path: "/userdata/rdkstudio/projects/ultralytics_yolo26/model/steelball-yolo26n-det_bayese_640x640_nv12.bin"
+        model_type: det
         classes_num: 1
         target_class_id: 0
         score_threshold: 0.25
