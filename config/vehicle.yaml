@@ -10,6 +10,8 @@ vehicle:
   capture:
     # Enables polar capture-target semantics only; it does not enable real transport or car control.
     enabled: false
+    # Send valid polar coordinates while forcing enabled=0 at the UART gateway.
+    output_only: false
     target_timeout_ms: 200
     feedback:
       enabled: false

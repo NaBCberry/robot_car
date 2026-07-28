@@ -27,6 +27,7 @@ SAFE_DEFAULTS: Dict[str, Any] = {
         "link_timeout_ms": 500,
         "capture": {
             "enabled": False,
+            "output_only": False,
             "target_timeout_ms": 200,
             "feedback": {"enabled": False, "type": "none", "timeout_ms": 800},
             "no_feedback_policy": {"result": "CAPTURE_ATTEMPTED", "post_capture_action": "HOLD",
@@ -92,6 +93,8 @@ def _validate_safe(config: Dict[str, Any]) -> None:
     feedback = capture.get("feedback", {})
     if not isinstance(capture.get("enabled", False), bool):
         raise ValueError("vehicle.capture.enabled must be a YAML boolean")
+    if not isinstance(capture.get("output_only", False), bool):
+        raise ValueError("vehicle.capture.output_only must be a YAML boolean")
     if not isinstance(feedback.get("enabled", False), bool):
         raise ValueError("vehicle.capture.feedback.enabled must be a YAML boolean")
     if feedback.get("type") not in {"none", "hall", "current", "switch", "vision"}:

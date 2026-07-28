@@ -1,0 +1,15 @@
+# TEMPORARY ONLY: affine approximation for a 1280x720 camera image.
+# It maps the bbox bottom-center pixel (u, v) to the electromagnet capture-point frame:
+# forward_mm = 1200 - 1.5 * v; lateral_mm = 1.2 * u - 768.
+# Do not authorize vehicle motion with these values. Replace this file with a measured
+# ground-plane homography after the planned calibration web tool is available.
+image_to_capture_homography:
+  - 0.0
+  - -1.5
+  - 1200.0
+  - 1.2
+  - 0.0
+  - -768.0
+  - 0.0
+  - 0.0
+  - 1.0

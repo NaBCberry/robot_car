@@ -19,7 +19,7 @@ from .yolo_adapter import RUNTIME_DIR
 
 
 class SteelballAdapter(VisionPlugin):
-    """Detect the primary steel ball and emit a calibrated target when available."""
+    """Detect the lowest steel ball and emit a calibrated target when available."""
 
     def __init__(self, name: str, config: Dict[str, Any]) -> None:
         super().__init__(name, config)
@@ -82,7 +82,9 @@ class SteelballAdapter(VisionPlugin):
         target_class = int(self.config.get("config", {}).get("target_class_id", 0))
         candidates = [(box, float(score), int(class_id)) for box, score, class_id in
                       zip(boxes, scores, class_ids) if int(class_id) == target_class]
-        return max(candidates, key=lambda item: item[1]) if candidates else None
+        # The lowest bbox edge approximates the nearest ground contact point. Confidence
+        # only breaks ties so another, higher ball cannot steal the capture target.
+        return max(candidates, key=lambda item: (float(item[0][3]), item[1])) if candidates else None
 
     def _event_from_detection(self, frame: CameraFrame, box: Any, score: float,
                               class_id: int) -> VisionEvent:

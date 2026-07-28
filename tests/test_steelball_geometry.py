@@ -6,6 +6,15 @@ from robot_car.perception.steelball_geometry import ImageToCaptureProjector
 
 
 class SteelballGeometryTests(unittest.TestCase):
+    def test_adapter_prefers_lowest_ball_over_higher_confidence(self):
+        adapter = SteelballAdapter("steelball", {"config": {"target_class_id": 0}})
+        selected = adapter._select_primary(
+            [[100, 100, 140, 180], [300, 250, 360, 400]],
+            [0.99, 0.60],
+            [0, 0],
+        )
+        self.assertEqual(selected[0], [300, 250, 360, 400])
+
     def test_identity_homography_projects_capture_coordinates(self):
         projector = ImageToCaptureProjector([1, 0, 0, 0, 1, 0, 0, 0, 1])
         target = projector.project(300, 400)

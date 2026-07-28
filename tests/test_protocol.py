@@ -123,6 +123,24 @@ class ProtocolTests(unittest.TestCase):
         self.assertTrue(unpack_motion(command.payload)["target_valid"])
         gateway.close()
 
+    def test_gateway_output_only_keeps_coordinates_and_disables_motion(self):
+        transport = FakeTransport()
+        gateway = VehicleGateway(transport, {
+            "control_enabled": True,
+            "default_valid_for_ms": 200,
+            "capture": {"enabled": True, "output_only": True},
+        })
+        gateway.open()
+        now_ms = time.monotonic_ns() // 1_000_000
+        target = CaptureTarget(now_ms, 17, -12000, 680, 940, 35, 200, True, True)
+        gateway.send_motion(MotionTarget(MotionMode.CAPTURE_TARGET_POLAR, True, 200, target))
+        decoded = unpack_motion(FrameDecoder().feed(transport.sent[-1])[0].payload)
+        self.assertFalse(decoded["enabled"])
+        self.assertTrue(decoded["target_valid"])
+        self.assertEqual(decoded["bearing_mdeg"], -12000)
+        self.assertEqual(decoded["range_mm"], 680)
+        gateway.close()
+
     def test_gateway_expired_polar_target_becomes_explicit_safe_frame(self):
         transport = FakeTransport()
         gateway = VehicleGateway(transport, {

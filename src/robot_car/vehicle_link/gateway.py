@@ -59,7 +59,9 @@ class VehicleGateway:
                              and not capture.is_expired(time.monotonic_ns() // 1_000_000))
         if safe_target.mode == MotionMode.CAPTURE_TARGET_POLAR:
             if capture_permitted:
-                payload = pack_motion(safe_target.mode, safe_target.enabled, safe_target.valid_for_ms,
+                output_only = bool(self.config.get("capture", {}).get("output_only", False))
+                payload = pack_motion(safe_target.mode, safe_target.enabled and not output_only,
+                                      safe_target.valid_for_ms,
                                       track_id=capture.track_id, bearing_mdeg=capture.bearing_mdeg,
                                       range_mm=capture.range_mm,
                                       confidence_permille=capture.confidence_permille,
