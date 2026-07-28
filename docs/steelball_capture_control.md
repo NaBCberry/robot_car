@@ -48,8 +48,9 @@ flowchart LR
 2. `scheduler.py` 调用 `steelball_adapter.py`，后者只复用
    `/userdata/rdkstudio/projects/ultralytics_yolo26/runtime/python/yolo26_seg.py` 的
    `YOLO26Seg`，不启动其 Web 程序，也不重复打开摄像头。
-3. adapter 选取目标类别中置信度最高的实例；`steelball_geometry.py` 使用 3x3 单应
-   矩阵把底边中点投影到相对电磁铁的地面坐标，并计算方位角和距离。未标定时只产生
+3. adapter 选取目标类别中边界框底边最低的实例；置信度仅在底边相同时用于决胜。
+   `steelball_geometry.py` 使用 3x3 单应矩阵把底边中点投影到相对电磁铁的地面坐标，
+   并计算方位角和距离。未标定时只产生
    `STEELBALL_DETECTED`，不会进入捕获模式。
 4. `events.py` 形成带帧号、置信度和 TTL 的 `BALL_TARGET`，经 UDS 发布。`vehicled.py`
    同时交给状态机和仲裁器。

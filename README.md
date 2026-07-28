@@ -24,13 +24,15 @@ robot_car/
 │   └── __init__.py                    # 仓库根目录运行时的 src-layout 导入 shim
 ├── docs/
 │   ├── vision_to_motion_flow.md       # OCR/通用视觉事件到 MSPM0 运动目标的流程图和时序图
-│   └── steelball_capture_control.md   # 钢球单一语义运动链路、协议分层、标定和安全语义
+│   ├── steelball_capture_control.md   # 钢球单一语义运动链路、协议分层、标定和安全语义
+│   └── steelball_uart_bringup.md      # 最下方钢球识别、临时标定和真实 UART 联调说明
 ├── config/                            # 所有可部署参数，硬件路径不写死在代码中
 │   ├── base.yaml                      # 运行数据根目录、日志级别、UDS 和调试 Web 配置
 │   ├── camera.yaml                    # 摄像头启停、设备、分辨率、帧率和像素格式
 │   ├── vision.yaml                    # 视觉插件列表、频率、优先级、BPU 和确认策略
 │   ├── vehicle.yaml                   # 状态机、车控总开关、心跳和超时参数
-│   └── transport.yaml                 # Fake/UART/CAN 类型、端口、波特率和 CAN ID
+│   ├── transport.yaml                 # Fake/UART/CAN 类型、端口、波特率和 CAN ID
+│   └── temporary_steelball_calibration.yaml # 临时图像到电磁铁坐标映射，仅供输出联调
 ├── deploy/
 │   └── systemd/                       # 仅供人工部署的 systemd 模板，不自动安装
 │       ├── robot-vehicle.service      # vehicled 服务模板，要求先启动
@@ -38,6 +40,7 @@ robot_car/
 ├── scripts/                           # 日常启动和只读诊断入口
 │   ├── diagnose_hardware.sh           # 只读列举 Python、视频、串口和 CAN 候选资源
 │   ├── send_protocol_frame.sh          # 显式确认后向指定 UART 发送一帧协议测试数据
+│   ├── run_steelball_uart.sh           # 相机识别最下方钢球并向 UART 输出极坐标的联调入口
 │   ├── run_vehicled.sh                # 设置工作目录/PYTHONPATH 后启动 vehicled
 │   └── run_visiond.sh                 # 设置工作目录/PYTHONPATH 后启动 visiond
 ├── src/
@@ -120,6 +123,8 @@ robot_car/
 [`docs/vision_to_motion_flow.md`](docs/vision_to_motion_flow.md)。
 钢球捕获的专用控制过程、两条链路的比较及电磁铁无反馈处理见
 [`docs/steelball_capture_control.md`](docs/steelball_capture_control.md)。
+真实相机到 UART 的最下方钢球联调入口与临时标定限制见
+[`docs/steelball_uart_bringup.md`](docs/steelball_uart_bringup.md)。
 
 ## 安全默认值
 
@@ -127,6 +132,8 @@ robot_car/
 - `transport.enabled: false`，UART 设备与 CAN 通道/ID 均为空。
 - `vehicle.control_enabled: false`，网关强制发送禁用运动模式。
 - `vehicle.capture.enabled: false`；即使启用钢球插件，也不会下发有效捕获目标。
+- `vehicle.capture.output_only: false` 是额外的极坐标输出保护开关。生产联调脚本会把
+  它设为 `true`，使 UART 保留有效角度/距离字段但强制 `enabled=0`。
 - `vehicle.capture.feedback.enabled: false`；未接入霍尔/电流/开关/视觉反馈时，只能
   上报 `CAPTURE_ATTEMPTED`，绝不把电磁铁动作描述为捕获成功。
 - 启动和正常停止都会通过已选传输发送一次禁用/零速目标；FakeTransport
@@ -203,6 +210,22 @@ YOLO adapter 复用现有 `YOLO26Detect.predict(frame)`；OCR adapter 复用现�
 `YOLO26Seg` 和其中配置的模型文件，只使用 `visiond` 提供的 `CameraFrame`；
 它不导入或运行 `steelball_web.py`，因此不会额外打开摄像头。要生成供 MCU
 伺服使用的 `BALL_TARGET`，还必须填写并验证图像到电磁铁捕获点的标定矩阵。
+
+## 最下方钢球 UART 联调
+
+已确认相机设备后，下面的命令会打开真实相机和 `/dev/ttyS1`，复用
+`ultralytics_yolo26` 的钢球分割模型，选取画面中边界框底边最低的钢球，并持续发送
+`CAPTURE_TARGET_POLAR`。默认是输出模式：帧中仍有角度和距离，`enabled=0`，MSPM0
+不得驱动电机。
+
+```bash
+cd /userdata/rdkstudio/projects/robot_car
+./scripts/run_steelball_uart.sh --camera /dev/video0
+```
+
+`--camera` 必须替换为板上实际的视频设备。脚本会单独生成临时运行配置，不改写项目的
+`config/transport.yaml`。临时标定和实际运动的双确认命令、输出字段及替换标定的方案见
+[`docs/steelball_uart_bringup.md`](docs/steelball_uart_bringup.md)。
 
 ## 视觉插件扩展
 
