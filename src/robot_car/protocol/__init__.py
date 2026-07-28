@@ -1,9 +1,10 @@
-"""MSPM0 protocol v1 codec."""
+"""MSPM0 protocol v2 codec."""
 
 from .framing import FrameDecoder, ProtocolError, crc16_ccitt, encode_frame
-from .messages import (CAPTURE_TARGET_FLAG_ARMED, CAPTURE_TARGET_FLAG_VALID, MessageType,
-                       ProtocolMessage, pack_capture_target, unpack_capture_target)
+from .messages import (MOTION_FLAG_CAPTURE_ARMED, MOTION_FLAG_ENABLED,
+                       MOTION_FLAG_TARGET_VALID, MessageType, MotionMode, ProtocolMessage,
+                       pack_motion, unpack_motion)
 
-__all__ = ["CAPTURE_TARGET_FLAG_ARMED", "CAPTURE_TARGET_FLAG_VALID", "FrameDecoder",
-           "MessageType", "ProtocolError", "ProtocolMessage", "crc16_ccitt", "encode_frame",
-           "pack_capture_target", "unpack_capture_target"]
+__all__ = ["MOTION_FLAG_CAPTURE_ARMED", "MOTION_FLAG_ENABLED", "MOTION_FLAG_TARGET_VALID",
+           "FrameDecoder", "MessageType", "MotionMode", "ProtocolError", "ProtocolMessage",
+           "crc16_ccitt", "encode_frame", "pack_motion", "unpack_motion"]

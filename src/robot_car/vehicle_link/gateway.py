@@ -8,11 +8,9 @@ import time
 from typing import Any, Dict, Optional
 
 from robot_car.decision.motion_target import MotionTarget
-from robot_car.decision.capture_target import CaptureTarget
 from robot_car.protocol.framing import FrameDecoder, encode_frame
-from robot_car.protocol.messages import (CAPTURE_TARGET_FLAG_ARMED, CAPTURE_TARGET_FLAG_VALID,
-                                         HEARTBEAT_STRUCT, MessageType, ProtocolMessage,
-                                         pack_capture_target, pack_json, pack_motion, unpack_ack,
+from robot_car.protocol.messages import (HEARTBEAT_STRUCT, MessageType, MotionMode,
+                                         ProtocolMessage, pack_json, pack_motion, unpack_ack,
                                          unpack_json)
 
 from .telemetry import TelemetryCache
@@ -21,10 +19,6 @@ from .watchdog import LinkWatchdog
 
 
 LOG = logging.getLogger(__name__)
-MODE_VALUES = {"DISABLED": 0, "BOOT": 0, "IDLE": 1, "LINE_FOLLOW": 2, "VISION_ASSIST": 3,
-               "CAPTURE_SERVO": 4, "FAILSAFE": 0, "E_STOP": 0, "FAULT": 0}
-
-
 class VehicleGateway:
     def __init__(self, transport: Transport, vehicle_config: Dict[str, Any]) -> None:
         self.transport = transport
@@ -41,7 +35,8 @@ class VehicleGateway:
 
     def open(self) -> None:
         self.transport.open()
-        self.send_motion(MotionTarget(enable=False, valid_for_ms=int(self.config.get("default_valid_for_ms", 200))))
+        self.send_motion(MotionTarget(enabled=False,
+                         valid_for_ms=int(self.config.get("default_valid_for_ms", 200))))
 
     def _send(self, message_type: MessageType, payload: bytes, expect_ack: bool = False) -> int:
         with self._lock:
@@ -57,40 +52,29 @@ class VehicleGateway:
         safe_target = target
         if not bool(self.config.get("control_enabled", False)):
             safe_target = target.safe()
-        payload = pack_motion(MODE_VALUES.get(safe_target.mode, 0), safe_target.enable,
-                              safe_target.target_speed_mm_s, safe_target.target_steering_mdeg,
-                              safe_target.speed_limit_mm_s, safe_target.valid_for_ms)
+        capture = safe_target.capture_target
+        capture_permitted = (safe_target.mode == MotionMode.CAPTURE_TARGET_POLAR
+                             and bool(self.config.get("capture", {}).get("enabled", False))
+                             and capture is not None
+                             and not capture.is_expired(time.monotonic_ns() // 1_000_000))
+        if safe_target.mode == MotionMode.CAPTURE_TARGET_POLAR:
+            if capture_permitted:
+                payload = pack_motion(safe_target.mode, safe_target.enabled, safe_target.valid_for_ms,
+                                      track_id=capture.track_id, bearing_mdeg=capture.bearing_mdeg,
+                                      range_mm=capture.range_mm,
+                                      confidence_permille=capture.confidence_permille,
+                                      measurement_age_ms=capture.measurement_age_ms,
+                                      target_valid=capture.target_valid,
+                                      capture_armed=capture.capture_armed)
+            else:
+                payload = pack_motion(safe_target.mode, False, safe_target.valid_for_ms)
+        else:
+            payload = pack_motion(safe_target.mode, safe_target.enabled, safe_target.valid_for_ms)
         return self._send(MessageType.CMD_MOTION, payload, expect_ack=True)
 
     def send_event(self, event_type: str, payload: Dict[str, Any], valid_for_ms: int) -> int:
         return self._send(MessageType.CMD_EVENT, pack_json({"event_type": event_type,
                           "payload": payload, "valid_for_ms": valid_for_ms}), expect_ack=True)
-
-    def send_capture_event(self, event_type: str) -> Optional[int]:
-        capture = self.config.get("capture", {})
-        if (not self.config.get("control_enabled", False) or not capture.get("enabled", False)
-                or event_type not in {"CAPTURE_ARM", "CAPTURE_CANCEL"}):
-            return None
-        return self.send_event(event_type, {"feedback_enabled": bool(capture.get("feedback", {})
-                                                                       .get("enabled", False))},
-                               int(capture.get("target_timeout_ms", 200)))
-
-    def send_capture_target(self, target: CaptureTarget) -> int:
-        capture = self.config.get("capture", {})
-        permitted = (bool(self.config.get("control_enabled", False))
-                     and bool(capture.get("enabled", False))
-                     and capture.get("control_mode") == "MCU_TARGET_SERVO")
-        now_ms = time.monotonic_ns() // 1_000_000
-        safe_target = target if permitted and not target.is_expired(now_ms) else target.safe()
-        flags = 0
-        if safe_target.target_valid:
-            flags |= CAPTURE_TARGET_FLAG_VALID
-        if safe_target.capture_armed:
-            flags |= CAPTURE_TARGET_FLAG_ARMED
-        payload = pack_capture_target(flags, safe_target.track_id, safe_target.bearing_mdeg,
-                                      safe_target.range_mm, safe_target.confidence_permille,
-                                      safe_target.measurement_age_ms, safe_target.valid_for_ms)
-        return self._send(MessageType.CMD_CAPTURE_TARGET, payload, expect_ack=True)
 
     def send_heartbeat(self) -> int:
         now_ms = (time.monotonic_ns() // 1_000_000) & 0xFFFFFFFF
@@ -129,7 +113,7 @@ class VehicleGateway:
 
     def close(self) -> None:
         try:
-            self.send_motion(MotionTarget(enable=False,
+            self.send_motion(MotionTarget(enabled=False,
                              valid_for_ms=int(self.config.get("default_valid_for_ms", 200))))
         except Exception:
             LOG.exception("failed to send final disable command")

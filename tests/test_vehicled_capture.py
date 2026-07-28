@@ -3,7 +3,7 @@ import unittest
 
 from robot_car.perception.events import VisionEvent
 from robot_car.protocol.framing import FrameDecoder
-from robot_car.protocol.messages import MessageType, unpack_capture_target, unpack_motion
+from robot_car.protocol.messages import MessageType, MotionMode, unpack_motion
 from robot_car.vehicle_link.fake_transport import FakeTransport
 from robot_car.vehicled import VehicleDaemon
 
@@ -26,21 +26,19 @@ class OneEventSubscriber:
 
 
 class VehicleDaemonCaptureTests(unittest.TestCase):
-    def test_capture_servo_cycle_does_not_send_enabled_motion_command(self):
+    def test_capture_servo_cycle_sends_one_polar_cmd_motion(self):
         now_ms = time.monotonic_ns() // 1_000_000
         config = {
             "runtime": {"vision_socket": "/tmp/not-used.sock"},
             "vehicle": {
                 "control_enabled": True,
                 "initial_mode": "LINE_FOLLOW",
-                "line_follow_speed_mm_s": 200,
                 "default_valid_for_ms": 200,
                 "heartbeat_hz": 1000,
                 "vision_timeout_ms": 500,
                 "link_timeout_ms": 500,
                 "capture": {
                     "enabled": True,
-                    "control_mode": "MCU_TARGET_SERVO",
                     "target_timeout_ms": 200,
                     "feedback": {"enabled": False},
                 },
@@ -59,14 +57,12 @@ class VehicleDaemonCaptureTests(unittest.TestCase):
         decoder = FrameDecoder()
         for frame in transport.sent:
             messages.extend(decoder.feed(frame))
-        capture_messages = [message for message in messages
-                            if message.message_type == MessageType.CMD_CAPTURE_TARGET]
-        self.assertEqual(len(capture_messages), 1)
-        self.assertTrue(unpack_capture_target(capture_messages[0].payload)["target_valid"])
         motions = [unpack_motion(message.payload) for message in messages
                    if message.message_type == MessageType.CMD_MOTION]
-        self.assertTrue(motions)
-        self.assertTrue(all(not motion["enable"] for motion in motions))
+        polar = [motion for motion in motions if motion["mode"] == MotionMode.CAPTURE_TARGET_POLAR]
+        self.assertEqual(len(polar), 1)
+        self.assertTrue(polar[0]["target_valid"])
+        self.assertEqual(polar[0]["range_mm"], 680)
 
 
 if __name__ == "__main__":

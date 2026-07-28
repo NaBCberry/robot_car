@@ -3,14 +3,12 @@ import unittest
 from robot_car.decision.state_machine import VehicleState, VehicleStateMachine
 from robot_car.perception.events import VisionEvent
 from robot_car.perception.stabilizer import EventStabilizer
+from robot_car.protocol.messages import MotionMode
 
 
 CONFIG = {
     "control_enabled": True,
     "initial_mode": "LINE_FOLLOW",
-    "line_follow_speed_mm_s": 300,
-    "speed_limit_mm_s": 400,
-    "slow_speed_limit_mm_s": 100,
     "default_valid_for_ms": 200,
     "vision_timeout_ms": 500,
     "stop_hold_ms": 1000,
@@ -22,26 +20,28 @@ def event(event_type, timestamp=1000):
 
 
 class StateMachineTests(unittest.TestCase):
-    def test_default_line_follow(self):
+    def test_default_line_follow_is_a_semantic_mode(self):
         machine = VehicleStateMachine(CONFIG)
         machine.start()
         target = machine.target(1000)
         self.assertEqual(machine.state, VehicleState.LINE_FOLLOW)
-        self.assertTrue(target.enable)
-        self.assertEqual(target.target_speed_mm_s, 300)
+        self.assertEqual(target.mode, MotionMode.LINE_FOLLOW)
+        self.assertTrue(target.enabled)
 
     def test_stop_is_disabled_high_level_target(self):
         machine = VehicleStateMachine(CONFIG)
         machine.start()
         machine.handle_event(event("STOP"), 1000)
         self.assertEqual(machine.state, VehicleState.VISION_ASSIST)
-        self.assertFalse(machine.target(1200).enable)
+        self.assertFalse(machine.target(1200).enabled)
 
-    def test_slow_down_limits_speed(self):
+    def test_slow_down_selects_mspm0_vision_assist_policy(self):
         machine = VehicleStateMachine(CONFIG)
         machine.start()
         machine.handle_event(event("SLOW_DOWN"), 1000)
-        self.assertEqual(machine.target(1001).target_speed_mm_s, 100)
+        target = machine.target(1001)
+        self.assertEqual(target.mode, MotionMode.VISION_ASSIST)
+        self.assertTrue(target.enabled)
 
     def test_vision_timeout_fails_safe(self):
         machine = VehicleStateMachine(CONFIG)
@@ -49,7 +49,7 @@ class StateMachineTests(unittest.TestCase):
         machine.handle_event(event("INTERSECTION"), 1000)
         machine.update_safety(True, now_ms=1600)
         self.assertEqual(machine.state, VehicleState.FAILSAFE)
-        self.assertFalse(machine.target(1600).enable)
+        self.assertFalse(machine.target(1600).enabled)
 
     def test_missing_vision_heartbeat_fails_after_grace(self):
         machine = VehicleStateMachine(CONFIG)
@@ -66,26 +66,26 @@ class StateMachineTests(unittest.TestCase):
         machine.update_safety(True, estop=True, now_ms=1000)
         self.assertEqual(machine.state, VehicleState.E_STOP)
 
-    def test_control_gate_forces_zero(self):
+    def test_control_gate_disables_motion(self):
         config = dict(CONFIG, control_enabled=False)
         machine = VehicleStateMachine(config)
         machine.start()
         target = machine.target(1000)
-        self.assertFalse(target.enable)
-        self.assertEqual(target.target_speed_mm_s, 0)
+        self.assertFalse(target.enabled)
+        self.assertEqual(target.mode, MotionMode.LINE_FOLLOW)
 
-    def test_capture_servo_mode_uses_zero_motion_target(self):
-        config = dict(CONFIG, capture={"enabled": True, "control_mode": "MCU_TARGET_SERVO"})
+    def test_capture_mode_uses_polar_motion_semantics(self):
+        config = dict(CONFIG, capture={"enabled": True})
         machine = VehicleStateMachine(config)
         machine.start()
         target_event = VisionEvent(1000, "steelball", "BALL_TARGET", 0.9,
                                    {"track_id": 1, "bearing_mdeg": 0, "range_mm": 300},
                                    1, 150, 640, 480)
         machine.handle_event(target_event, 1010)
-        self.assertEqual(machine.state, VehicleState.CAPTURE_SERVO)
+        self.assertEqual(machine.state, VehicleState.CAPTURE_TARGET_POLAR)
         target = machine.target(1020)
-        self.assertTrue(target.enable)
-        self.assertEqual(target.target_speed_mm_s, 0)
+        self.assertTrue(target.enabled)
+        self.assertEqual(target.mode, MotionMode.CAPTURE_TARGET_POLAR)
         machine.handle_event(event("CAPTURE_CANCEL", 1030), 1030)
         self.assertEqual(machine.state, VehicleState.LINE_FOLLOW)
 

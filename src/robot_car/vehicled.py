@@ -74,16 +74,9 @@ class VehicleDaemon:
                                                  str(telemetry.get("fault", "")), now_ms)
                 now = time.monotonic()
                 if now >= next_send:
-                    capture_event = self.control_arbiter.consume_capture_event()
-                    if capture_event is not None:
-                        self.gateway.send_capture_event(capture_event)
                     self.gateway.send_heartbeat()
-                    motion, capture_target = self.control_arbiter.select(
-                        now_ms, self.state_machine.target(now_ms))
-                    if motion is not None:
-                        self.gateway.send_motion(motion)
-                    elif capture_target is not None:
-                        self.gateway.send_capture_target(capture_target)
+                    motion = self.control_arbiter.select(now_ms, self.state_machine.target(now_ms))
+                    self.gateway.send_motion(motion)
                     next_send = now + interval
         finally:
             self.subscriber.close()

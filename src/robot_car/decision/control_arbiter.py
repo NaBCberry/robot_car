@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 from robot_car.perception.events import VisionEvent
+from robot_car.protocol.messages import MotionMode
 
-from .capture_target import CaptureTarget, ControlMode
+from .capture_target import CaptureTarget
 from .motion_target import MotionTarget
 
 
@@ -19,25 +20,20 @@ class ControlArbiter:
         capture = vehicle_config.get("capture", {})
         self.capture_config = capture
         self.capture_enabled = bool(capture.get("enabled", False))
-        self.mode = ControlMode(str(capture.get("control_mode", "RDK_MOTION_TARGET")))
         self.capture_armed = False
         self.latest_target: Optional[CaptureTarget] = None
-        self._pending_capture_event: Optional[str] = None
 
     def handle_event(self, event: VisionEvent, now_ms: int) -> None:
         if event.is_expired(now_ms):
             return
         if event.event_type == "CAPTURE_ARM" and self.capture_enabled:
             self.capture_armed = True
-            self._pending_capture_event = "CAPTURE_ARM"
             return
         if event.event_type == "CAPTURE_CANCEL" and self.capture_enabled:
             self.capture_armed = False
             self.latest_target = None
-            self._pending_capture_event = "CAPTURE_CANCEL"
             return
-        if (event.event_type == "BALL_TARGET" and self.capture_enabled
-                and self.mode == ControlMode.MCU_TARGET_SERVO):
+        if event.event_type == "BALL_TARGET" and self.capture_enabled:
             valid_for_ms = int(self.capture_config.get("target_timeout_ms", 200))
             try:
                 self.latest_target = CaptureTarget.from_ball_event(event, now_ms, valid_for_ms,
@@ -46,20 +42,18 @@ class ControlArbiter:
                 self.latest_target = None
                 LOG.warning("discarded invalid steel-ball target: %s", error)
 
-    def select(self, now_ms: int, fallback_motion: MotionTarget) -> Tuple[Optional[MotionTarget],
-                                                                            Optional[CaptureTarget]]:
-        """Return exactly one command class, keeping a disabled command explicit."""
-        if not self.capture_enabled or self.mode == ControlMode.RDK_MOTION_TARGET:
-            return fallback_motion, None
-        if not fallback_motion.enable or self.latest_target is None or self.latest_target.is_expired(now_ms):
-            valid_for_ms = int(self.capture_config.get("target_timeout_ms", 200))
-            return None, CaptureTarget(now_ms, valid_for_ms=valid_for_ms)
-        return None, self.latest_target
-
-    def consume_capture_event(self) -> Optional[str]:
-        event_type = self._pending_capture_event
-        self._pending_capture_event = None
-        return event_type
+    def select(self, now_ms: int, fallback_motion: MotionTarget) -> MotionTarget:
+        """Return the one semantic CMD_MOTION intent allowed for this cycle."""
+        if (not self.capture_enabled
+                or fallback_motion.mode != MotionMode.CAPTURE_TARGET_POLAR):
+            return fallback_motion
+        if (not fallback_motion.enabled or self.latest_target is None
+                or self.latest_target.is_expired(now_ms)):
+            return MotionTarget(mode=MotionMode.CAPTURE_TARGET_POLAR, enabled=False,
+                                valid_for_ms=fallback_motion.valid_for_ms)
+        return MotionTarget(mode=MotionMode.CAPTURE_TARGET_POLAR, enabled=True,
+                            valid_for_ms=self.latest_target.valid_for_ms,
+                            capture_target=self.latest_target)
 
     def capture_result(self, telemetry: Dict[str, Any]) -> str:
         """Do not infer capture success when physical feedback is disabled."""

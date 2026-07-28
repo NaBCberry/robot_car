@@ -9,17 +9,26 @@ from enum import IntEnum
 from typing import Any, Dict
 
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 
 
 class MessageType(IntEnum):
     CMD_MOTION = 0x01
     CMD_EVENT = 0x02
     HEARTBEAT = 0x03
-    CMD_CAPTURE_TARGET = 0x04
     TELEMETRY = 0x10
     ACK = 0x11
     FAULT = 0x12
+
+
+class MotionMode(IntEnum):
+    """High-level movement behaviors implemented by the MSPM0."""
+
+    DISABLED = 0
+    IDLE = 1
+    LINE_FOLLOW = 2
+    VISION_ASSIST = 3
+    CAPTURE_TARGET_POLAR = 4
 
 
 @dataclass(frozen=True)
@@ -34,72 +43,108 @@ class ProtocolMessage:
             raise ValueError("sequence must fit uint16")
 
 
-MOTION_STRUCT = struct.Struct(">BBiiIH")
+# mode:u8, flags:u8, valid_for_ms:u16
+MOTION_COMMON_STRUCT = struct.Struct(">BBH")
+# track_id:u16, bearing_mdeg:i32, range_mm:i32, confidence_permille:u16,
+# measurement_age_ms:u16
+MOTION_POLAR_TARGET_STRUCT = struct.Struct(">HiiHH")
 ACK_STRUCT = struct.Struct(">HB")
 HEARTBEAT_STRUCT = struct.Struct(">IH")
-# flags:u8, reserved:u8, track_id:u16, bearing_mdeg:i32, range_mm:i32,
-# confidence_permille:u16, measurement_age_ms:u16, valid_for_ms:u16
-CAPTURE_TARGET_STRUCT = struct.Struct(">BBHiiHHH")
-CAPTURE_TARGET_FLAG_VALID = 0x01
-CAPTURE_TARGET_FLAG_ARMED = 0x02
+MOTION_FLAG_ENABLED = 0x01
+MOTION_FLAG_TARGET_VALID = 0x02
+MOTION_FLAG_CAPTURE_ARMED = 0x04
+MOTION_FLAG_MASK = MOTION_FLAG_ENABLED | MOTION_FLAG_TARGET_VALID | MOTION_FLAG_CAPTURE_ARMED
 
 
-def pack_motion(mode: int, enable: bool, speed: int, steering: int, speed_limit: int, valid_for_ms: int) -> bytes:
-    return MOTION_STRUCT.pack(mode, int(enable), speed, steering, speed_limit, valid_for_ms)
+def _motion_mode(value: int | MotionMode) -> MotionMode:
+    try:
+        return MotionMode(value)
+    except ValueError as error:
+        raise ValueError(f"unknown CMD_MOTION mode: {value}") from error
+
+
+def _validate_uint(value: int, label: str, maximum: int, *, minimum: int = 0) -> None:
+    if not minimum <= value <= maximum:
+        raise ValueError(f"{label} must fit {minimum}..{maximum}")
+
+
+def pack_motion(mode: int | MotionMode, enabled: bool, valid_for_ms: int, *,
+                track_id: int = 0, bearing_mdeg: int = 0, range_mm: int = 0,
+                confidence_permille: int = 0, measurement_age_ms: int = 0,
+                target_valid: bool = False, capture_armed: bool = False) -> bytes:
+    """Pack one v2 semantic motion intent without exposing wheel control."""
+    parsed_mode = _motion_mode(mode)
+    _validate_uint(valid_for_ms, "valid_for_ms", 0xFFFF, minimum=1)
+    flags = MOTION_FLAG_ENABLED if enabled else 0
+
+    if parsed_mode != MotionMode.CAPTURE_TARGET_POLAR:
+        if any((track_id, bearing_mdeg, range_mm, confidence_permille, measurement_age_ms,
+                target_valid, capture_armed)):
+            raise ValueError("only CAPTURE_TARGET_POLAR may contain a target payload")
+        return MOTION_COMMON_STRUCT.pack(parsed_mode, flags, valid_for_ms)
+
+    if target_valid:
+        _validate_uint(track_id, "track_id", 0xFFFF)
+        _validate_uint(range_mm, "range_mm", 0x7FFFFFFF)
+        _validate_uint(confidence_permille, "confidence_permille", 1000)
+        _validate_uint(measurement_age_ms, "measurement_age_ms", 0xFFFF)
+        if not -0x80000000 <= bearing_mdeg <= 0x7FFFFFFF:
+            raise ValueError("bearing_mdeg must fit int32")
+        flags |= MOTION_FLAG_TARGET_VALID
+        if capture_armed:
+            flags |= MOTION_FLAG_CAPTURE_ARMED
+    elif any((track_id, bearing_mdeg, range_mm, confidence_permille, measurement_age_ms,
+              capture_armed)):
+        raise ValueError("an invalid polar target must use zero fields and be disarmed")
+
+    return (MOTION_COMMON_STRUCT.pack(parsed_mode, flags, valid_for_ms)
+            + MOTION_POLAR_TARGET_STRUCT.pack(track_id, bearing_mdeg, range_mm,
+                                              confidence_permille, measurement_age_ms))
 
 
 def unpack_motion(payload: bytes) -> Dict[str, Any]:
-    if len(payload) != MOTION_STRUCT.size:
-        raise ValueError("invalid CMD_MOTION payload length")
-    mode, enable, speed, steering, speed_limit, valid_for_ms = MOTION_STRUCT.unpack(payload)
-    return {
+    """Decode and strictly validate a v2 semantic motion intent."""
+    if len(payload) < MOTION_COMMON_STRUCT.size:
+        raise ValueError("CMD_MOTION payload is shorter than its common header")
+    raw_mode, flags, valid_for_ms = MOTION_COMMON_STRUCT.unpack(payload[:MOTION_COMMON_STRUCT.size])
+    mode = _motion_mode(raw_mode)
+    if not 0 < valid_for_ms <= 0xFFFF:
+        raise ValueError("CMD_MOTION valid_for_ms must be positive")
+    if flags & ~MOTION_FLAG_MASK:
+        raise ValueError("CMD_MOTION flags contain reserved bits")
+    base = {
         "mode": mode,
-        "enable": bool(enable),
-        "target_speed_mm_s": speed,
-        "target_steering_mdeg": steering,
-        "speed_limit_mm_s": speed_limit,
+        "enabled": bool(flags & MOTION_FLAG_ENABLED),
+        "flags": flags,
         "valid_for_ms": valid_for_ms,
     }
+    if mode != MotionMode.CAPTURE_TARGET_POLAR:
+        if flags & (MOTION_FLAG_TARGET_VALID | MOTION_FLAG_CAPTURE_ARMED):
+            raise ValueError("only CAPTURE_TARGET_POLAR may set target flags")
+        if len(payload) != MOTION_COMMON_STRUCT.size:
+            raise ValueError("CMD_MOTION mode has an unexpected mode payload")
+        return base
 
-
-def pack_capture_target(flags: int, track_id: int, bearing_mdeg: int, range_mm: int,
-                        confidence_permille: int, measurement_age_ms: int,
-                        valid_for_ms: int) -> bytes:
-    """Pack a high-rate target relative to the MSPM0 capture point."""
-    if not 0 <= flags <= 0xFF:
-        raise ValueError("capture target flags must fit uint8")
-    if not 0 <= track_id <= 0xFFFF:
-        raise ValueError("capture target track_id must fit uint16")
-    if not 0 <= confidence_permille <= 1000:
-        raise ValueError("capture target confidence must be 0..1000")
-    if not 0 <= measurement_age_ms <= 0xFFFF:
-        raise ValueError("capture target measurement_age_ms must fit uint16")
-    if not 0 < valid_for_ms <= 0xFFFF:
-        raise ValueError("capture target valid_for_ms must fit uint16 and be positive")
-    return CAPTURE_TARGET_STRUCT.pack(flags, 0, track_id, bearing_mdeg, range_mm,
-                                      confidence_permille, measurement_age_ms, valid_for_ms)
-
-
-def unpack_capture_target(payload: bytes) -> Dict[str, Any]:
-    """Decode a target measurement without interpreting control policy."""
-    if len(payload) != CAPTURE_TARGET_STRUCT.size:
-        raise ValueError("invalid CMD_CAPTURE_TARGET payload length")
-    flags, reserved, track_id, bearing, range_mm, confidence, age_ms, valid_for_ms = \
-        CAPTURE_TARGET_STRUCT.unpack(payload)
-    if reserved != 0:
-        raise ValueError("CMD_CAPTURE_TARGET reserved byte must be zero")
+    expected_size = MOTION_COMMON_STRUCT.size + MOTION_POLAR_TARGET_STRUCT.size
+    if len(payload) != expected_size:
+        raise ValueError("CAPTURE_TARGET_POLAR has an invalid payload length")
+    track_id, bearing, range_mm, confidence, age_ms = MOTION_POLAR_TARGET_STRUCT.unpack(
+        payload[MOTION_COMMON_STRUCT.size:])
+    target_valid = bool(flags & MOTION_FLAG_TARGET_VALID)
+    capture_armed = bool(flags & MOTION_FLAG_CAPTURE_ARMED)
     if confidence > 1000:
-        raise ValueError("CMD_CAPTURE_TARGET confidence exceeds 1000")
+        raise ValueError("CAPTURE_TARGET_POLAR confidence exceeds 1000")
+    if not target_valid and (track_id or bearing or range_mm or confidence or age_ms or capture_armed):
+        raise ValueError("invalid CAPTURE_TARGET_POLAR must use zero fields and be disarmed")
     return {
-        "target_valid": bool(flags & CAPTURE_TARGET_FLAG_VALID),
-        "capture_armed": bool(flags & CAPTURE_TARGET_FLAG_ARMED),
-        "flags": flags,
+        **base,
+        "target_valid": target_valid,
+        "capture_armed": capture_armed,
         "track_id": track_id,
         "bearing_mdeg": bearing,
         "range_mm": range_mm,
         "confidence_permille": confidence,
         "measurement_age_ms": age_ms,
-        "valid_for_ms": valid_for_ms,
     }
 
 

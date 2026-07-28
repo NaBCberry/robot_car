@@ -1,9 +1,9 @@
 import unittest
 
-from robot_car.decision.capture_target import ControlMode
 from robot_car.decision.control_arbiter import ControlArbiter
 from robot_car.decision.motion_target import MotionTarget
 from robot_car.perception.events import VisionEvent
+from robot_car.protocol.messages import MotionMode
 
 
 def ball_event(timestamp=1000):
@@ -15,7 +15,6 @@ def ball_event(timestamp=1000):
 CAPTURE_CONFIG = {
     "capture": {
         "enabled": True,
-        "control_mode": "MCU_TARGET_SERVO",
         "target_timeout_ms": 200,
         "feedback": {"enabled": False},
     },
@@ -23,45 +22,44 @@ CAPTURE_CONFIG = {
 
 
 class ControlArbiterTests(unittest.TestCase):
-    def test_rdk_motion_mode_keeps_motion_command(self):
-        arbiter = ControlArbiter({"capture": {"enabled": True, "control_mode": "RDK_MOTION_TARGET"}})
-        motion = MotionTarget(enable=True, target_speed_mm_s=100)
-        selected_motion, capture = arbiter.select(1000, motion)
-        self.assertEqual(selected_motion, motion)
-        self.assertIsNone(capture)
+    def test_non_capture_mode_keeps_fallback_motion(self):
+        arbiter = ControlArbiter(CAPTURE_CONFIG)
+        motion = MotionTarget(mode=MotionMode.LINE_FOLLOW, enabled=True)
+        self.assertEqual(arbiter.select(1000, motion), motion)
 
-    def test_capture_mode_selects_relative_target_only(self):
+    def test_capture_mode_selects_one_polar_motion_target(self):
         arbiter = ControlArbiter(CAPTURE_CONFIG)
         arbiter.handle_event(ball_event(), 1020)
-        motion, capture = arbiter.select(1030, MotionTarget(enable=True))
-        self.assertIsNone(motion)
-        self.assertTrue(capture.target_valid)
-        self.assertEqual(capture.range_mm, 680)
-        self.assertFalse(capture.capture_armed)
+        motion = arbiter.select(1030, MotionTarget(MotionMode.CAPTURE_TARGET_POLAR, True))
+        self.assertEqual(motion.mode, MotionMode.CAPTURE_TARGET_POLAR)
+        self.assertTrue(motion.enabled)
+        self.assertIsNotNone(motion.capture_target)
+        self.assertEqual(motion.capture_target.range_mm, 680)
+        self.assertFalse(motion.capture_target.capture_armed)
 
-    def test_capture_target_expires_to_explicit_safe_target(self):
+    def test_expired_capture_target_becomes_explicit_safe_polar_motion(self):
         arbiter = ControlArbiter(CAPTURE_CONFIG)
         arbiter.handle_event(ball_event(), 1020)
-        motion, capture = arbiter.select(1300, MotionTarget(enable=True))
-        self.assertIsNone(motion)
-        self.assertFalse(capture.target_valid)
+        motion = arbiter.select(1300, MotionTarget(MotionMode.CAPTURE_TARGET_POLAR, True))
+        self.assertEqual(motion.mode, MotionMode.CAPTURE_TARGET_POLAR)
+        self.assertFalse(motion.enabled)
+        self.assertIsNone(motion.capture_target)
 
     def test_invalid_capture_target_is_discarded_without_raising(self):
         arbiter = ControlArbiter(CAPTURE_CONFIG)
         invalid = VisionEvent(1000, "steelball", "BALL_TARGET", 0.94, {}, 8, 150, 1280, 720)
         arbiter.handle_event(invalid, 1020)
-        _, capture = arbiter.select(1030, MotionTarget(enable=True))
-        self.assertFalse(capture.target_valid)
+        motion = arbiter.select(1030, MotionTarget(MotionMode.CAPTURE_TARGET_POLAR, True))
+        self.assertFalse(motion.enabled)
+        self.assertIsNone(motion.capture_target)
 
-    def test_capture_arm_is_single_high_level_event(self):
+    def test_capture_arm_is_carried_by_the_polar_motion_target(self):
         arbiter = ControlArbiter(CAPTURE_CONFIG)
         arm = VisionEvent(1000, "task", "CAPTURE_ARM", 1.0, {}, 1, 150, 1, 1)
         arbiter.handle_event(arm, 1010)
         arbiter.handle_event(ball_event(), 1020)
-        self.assertEqual(arbiter.consume_capture_event(), "CAPTURE_ARM")
-        self.assertIsNone(arbiter.consume_capture_event())
-        _, capture = arbiter.select(1030, MotionTarget(enable=True))
-        self.assertTrue(capture.capture_armed)
+        motion = arbiter.select(1030, MotionTarget(MotionMode.CAPTURE_TARGET_POLAR, True))
+        self.assertTrue(motion.capture_target.capture_armed)
 
     def test_disabled_feedback_never_claims_capture_success(self):
         arbiter = ControlArbiter(CAPTURE_CONFIG)

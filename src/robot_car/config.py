@@ -21,15 +21,12 @@ SAFE_DEFAULTS: Dict[str, Any] = {
     "vehicle": {
         "control_enabled": False,
         "initial_mode": "IDLE",
-        "default_speed_mm_s": 0,
-        "speed_limit_mm_s": 0,
         "default_valid_for_ms": 200,
         "heartbeat_hz": 20,
         "vision_timeout_ms": 500,
         "link_timeout_ms": 500,
         "capture": {
             "enabled": False,
-            "control_mode": "RDK_MOTION_TARGET",
             "target_timeout_ms": 200,
             "feedback": {"enabled": False, "type": "none", "timeout_ms": 800},
             "no_feedback_policy": {"result": "CAPTURE_ATTEMPTED", "post_capture_action": "HOLD",
@@ -91,16 +88,12 @@ def _validate_safe(config: Dict[str, Any]) -> None:
         raise ValueError("vehicle.default_valid_for_ms must fit uint16 and be positive")
     if float(vehicle.get("heartbeat_hz", 0)) <= 0:
         raise ValueError("vehicle.heartbeat_hz must be positive")
-    if int(vehicle.get("speed_limit_mm_s", 0)) < 0:
-        raise ValueError("vehicle.speed_limit_mm_s cannot be negative")
     capture = vehicle.get("capture", {})
     feedback = capture.get("feedback", {})
     if not isinstance(capture.get("enabled", False), bool):
         raise ValueError("vehicle.capture.enabled must be a YAML boolean")
     if not isinstance(feedback.get("enabled", False), bool):
         raise ValueError("vehicle.capture.feedback.enabled must be a YAML boolean")
-    if capture.get("control_mode") not in {"RDK_MOTION_TARGET", "MCU_TARGET_SERVO"}:
-        raise ValueError("vehicle.capture.control_mode is invalid")
     if feedback.get("type") not in {"none", "hall", "current", "switch", "vision"}:
         raise ValueError("vehicle.capture.feedback.type is invalid")
     if int(capture.get("target_timeout_ms", 0)) <= 0:

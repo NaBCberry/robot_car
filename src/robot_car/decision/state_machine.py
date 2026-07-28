@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Any, Dict, Optional
 
 from robot_car.perception.events import VisionEvent
+from robot_car.protocol.messages import MotionMode
 
 from .motion_target import MotionTarget
 from .rules import action_for
@@ -17,7 +18,7 @@ class VehicleState(str, Enum):
     IDLE = "IDLE"
     LINE_FOLLOW = "LINE_FOLLOW"
     VISION_ASSIST = "VISION_ASSIST"
-    CAPTURE_SERVO = "CAPTURE_SERVO"
+    CAPTURE_TARGET_POLAR = "CAPTURE_TARGET_POLAR"
     FAILSAFE = "FAILSAFE"
     E_STOP = "E_STOP"
     FAULT = "FAULT"
@@ -30,7 +31,6 @@ class VehicleStateMachine:
         self.last_vision_ms: Optional[int] = None
         self.vision_watch_started_ms: Optional[int] = None
         self.stop_until_ms = 0
-        self.speed_limit_override: Optional[int] = None
         self.fault = ""
         self.failsafe_reason = ""
 
@@ -52,14 +52,12 @@ class VehicleStateMachine:
             self.stop_until_ms = now + int(self.config.get("stop_hold_ms", 1000))
             self.state = VehicleState.VISION_ASSIST
         elif action == "SLOW_DOWN":
-            self.speed_limit_override = int(self.config.get("slow_speed_limit_mm_s", 100))
             self.state = VehicleState.VISION_ASSIST
         elif action == "INTERSECTION":
             self.state = VehicleState.VISION_ASSIST
-        elif (event.event_type == "BALL_TARGET" and self.config.get("capture", {}).get("enabled")
-              and self.config.get("capture", {}).get("control_mode") == "MCU_TARGET_SERVO"):
-            self.state = VehicleState.CAPTURE_SERVO
-        elif event.event_type == "CAPTURE_CANCEL" and self.state == VehicleState.CAPTURE_SERVO:
+        elif event.event_type == "BALL_TARGET" and self.config.get("capture", {}).get("enabled"):
+            self.state = VehicleState.CAPTURE_TARGET_POLAR
+        elif event.event_type == "CAPTURE_CANCEL" and self.state == VehicleState.CAPTURE_TARGET_POLAR:
             self.start()
 
     def update_safety(self, link_ok: bool, estop: bool = False, fault: str = "", now_ms: Optional[int] = None) -> None:
@@ -92,23 +90,17 @@ class VehicleStateMachine:
         control_enabled = bool(self.config.get("control_enabled", False))
         if self.state in {VehicleState.BOOT, VehicleState.IDLE, VehicleState.FAILSAFE,
                           VehicleState.E_STOP, VehicleState.FAULT}:
-            return MotionTarget(mode=self.state.value, enable=False, valid_for_ms=valid_for)
+            return MotionTarget(mode=MotionMode.DISABLED, enabled=False, valid_for_ms=valid_for)
         if now < self.stop_until_ms:
-            return MotionTarget(mode="VISION_ASSIST", enable=False, valid_for_ms=valid_for)
-        if self.state == VehicleState.CAPTURE_SERVO:
-            return MotionTarget(mode="CAPTURE_SERVO", enable=control_enabled, valid_for_ms=valid_for)
-        speed = int(self.config.get("line_follow_speed_mm_s", self.config.get("default_speed_mm_s", 0)))
-        limit = int(self.config.get("speed_limit_mm_s", 0))
-        if self.speed_limit_override is not None:
-            limit = min(limit, self.speed_limit_override) if limit > 0 else self.speed_limit_override
-            speed = min(speed, limit)
-        return MotionTarget(
-            mode=self.state.value,
-            enable=control_enabled,
-            target_speed_mm_s=speed if control_enabled else 0,
-            speed_limit_mm_s=limit if control_enabled else 0,
-            valid_for_ms=valid_for,
-        )
+            return MotionTarget(mode=MotionMode.VISION_ASSIST, enabled=False, valid_for_ms=valid_for)
+        if self.state == VehicleState.CAPTURE_TARGET_POLAR:
+            return MotionTarget(mode=MotionMode.CAPTURE_TARGET_POLAR, enabled=control_enabled,
+                                valid_for_ms=valid_for)
+        if self.state == VehicleState.VISION_ASSIST:
+            return MotionTarget(mode=MotionMode.VISION_ASSIST, enabled=control_enabled,
+                                valid_for_ms=valid_for)
+        return MotionTarget(mode=MotionMode.LINE_FOLLOW, enabled=control_enabled,
+                            valid_for_ms=valid_for)
 
 
 def monotonic_ms() -> int:

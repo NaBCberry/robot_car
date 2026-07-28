@@ -3,15 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
 from typing import Any, Dict
 
 from robot_car.perception.events import VisionEvent
-
-
-class ControlMode(str, Enum):
-    RDK_MOTION_TARGET = "RDK_MOTION_TARGET"
-    MCU_TARGET_SERVO = "MCU_TARGET_SERVO"
 
 
 @dataclass(frozen=True)
