@@ -98,7 +98,10 @@ documents = {}
 for name in ("base.yaml", "camera.yaml", "vision.yaml", "vehicle.yaml", "transport.yaml"):
     documents[name] = yaml.safe_load((source / name).read_text(encoding="utf-8")) or {}
 
-documents["base.yaml"].setdefault("web", {}).update({"enabled": True, "host": "127.0.0.1", "port": 8090})
+web = documents["base.yaml"].setdefault("web", {})
+web.setdefault("enabled", False)
+web.setdefault("host", "127.0.0.1")
+web.setdefault("port", 8090)
 documents["camera.yaml"]["camera"].update({
     "enabled": True, "device": camera, "width": 1280, "height": 720, "fps": 30,
     "pixel_format": "MJPG",

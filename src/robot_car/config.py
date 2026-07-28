@@ -76,9 +76,11 @@ def _validate_safe(config: Dict[str, Any]) -> None:
     transport = config.get("transport", {})
     vehicle = config.get("vehicle", {})
     camera = config.get("camera", {})
+    web = config.get("web", {})
     for label, value in (("transport.enabled", transport.get("enabled")),
                          ("vehicle.control_enabled", vehicle.get("control_enabled")),
-                         ("camera.enabled", camera.get("enabled"))):
+                         ("camera.enabled", camera.get("enabled")),
+                         ("web.enabled", web.get("enabled"))):
         if not isinstance(value, bool):
             raise ValueError(f"{label} must be a YAML boolean")
     if transport.get("enabled"):

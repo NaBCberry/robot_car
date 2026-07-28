@@ -21,6 +21,7 @@ from robot_car.perception.events import VisionEvent
 from robot_car.perception.plugin_registry import create_plugin
 from robot_car.perception.scheduler import PluginScheduler
 from robot_car.perception.stabilizer import EventStabilizer
+from robot_car.web.overlay import draw_overlay
 from robot_car.web.server import DebugServer
 
 
@@ -56,16 +57,20 @@ class VisionDaemon:
         self.last_frame_ms: Optional[int] = None
         self.next_health_ms = 0
         self.web: Optional[DebugServer] = None
+        self.web_enabled = bool(config.get("web", {}).get("enabled", False))
+        self._preview_lock = threading.Lock()
+        self._latest_frame_jpeg: Optional[bytes] = None
 
     def start(self) -> None:
         self.publisher.start()
         self.scheduler.initialize()
         self.camera.start()
         web_config = self.config.get("web", {})
-        if web_config.get("enabled", False):
+        if self.web_enabled:
             self.web = DebugServer(str(web_config.get("host", "127.0.0.1")),
                                    int(web_config.get("port", 8090)),
-                                   self.status, self.results, self.metrics.snapshot)
+                                   self.status, self.results, self.metrics.snapshot,
+                                   self.preview_frame)
             self.web.start()
         LOG.info("visiond started; simulate=%s socket=%s", self.simulate, self.publisher.path)
 
@@ -91,7 +96,9 @@ class VisionDaemon:
                     self.last_frame_ms = now
                     self.metrics.increment("frames_received")
                     events, observed_sources = self.scheduler.process_latest(frame, now)
-                    self._publish(self.stabilizer.update(events, now, observed_sources))
+                    confirmed_events = self.stabilizer.update(events, now, observed_sources)
+                    self._publish(confirmed_events)
+                    self._update_preview(frame, confirmed_events)
                 health_interval = int(self.config["vision"].get("health_interval_ms", 100))
                 if (self.camera.enabled and not self.camera.error and self.last_frame_ms is not None
                         and now - self.last_frame_ms <= int(self.config["vehicle"].get("vision_timeout_ms", 500))
@@ -121,6 +128,24 @@ class VisionDaemon:
 
     def results(self) -> Dict[str, Any]:
         return {"events": self.latest_events, "timestamp_monotonic_ms": monotonic_ms()}
+
+    def preview_frame(self) -> Optional[bytes]:
+        with self._preview_lock:
+            return self._latest_frame_jpeg
+
+    def _update_preview(self, frame: CameraFrame, events: List[VisionEvent]) -> None:
+        if not self.web_enabled:
+            return
+        try:
+            import cv2
+
+            image = draw_overlay(frame.image, events)
+            encoded, jpeg = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            if encoded:
+                with self._preview_lock:
+                    self._latest_frame_jpeg = jpeg.tobytes()
+        except Exception:
+            LOG.exception("failed to generate web preview")
 
     def close(self) -> None:
         self.stop_event.set()

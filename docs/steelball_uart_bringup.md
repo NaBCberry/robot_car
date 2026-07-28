@@ -37,6 +37,22 @@ range_mm = hypot(forward_mm, lateral_mm)
 
 `Ctrl-C` 会停止两个守护进程；车辆通信进程退出时会再发送一个禁用目标。
 
+## 实时识别页面
+
+网页是否启动由 `config/base.yaml` 控制：
+
+```yaml
+web:
+  enabled: true
+  host: 127.0.0.1
+  port: 8090
+```
+
+开启后，钢球启动脚本会在继续向 UART 发送极坐标的同时，启动 `visiond` 的只读页面。
+在本机浏览器打开 `http://127.0.0.1:8090/`，可查看实时画面、识别框、方位角与距离。
+将 `enabled` 改为 `false` 后，页面、HTTP 端口和 JPEG 编码均关闭，视觉识别与 UART
+发送不受影响。
+
 ## 心跳开关
 
 `config/transport.yaml` 中的 `transport.heartbeat.enabled` 默认是 `true`。设为 `false`
@@ -72,7 +88,7 @@ MSPM0 已明确不依赖该心跳维持运行，或需要单独验证运动帧�
 
 ## 观测与故障检查
 
-脚本会在 `127.0.0.1:8090` 打开只读状态接口。可观察：
+当网页开启时，脚本会在 `127.0.0.1:8090` 打开只读状态接口。可观察：
 
 - `/api/status`：相机、模型插件与 IPC 的健康状态。
 - `/api/results`：最近的 `BALL_TARGET`，其中包含 `bearing_mdeg` 与 `range_mm`。
