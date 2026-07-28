@@ -5,19 +5,21 @@ v2 与 v1 **不兼容**：两端必须同时升级；收到版本号为 `1` 的�
 v2 重新解释。v2 不再存在 `CMD_CAPTURE_TARGET`，所有车辆运动请求统一使用
 `CMD_MOTION (0x01)`。
 
-UART 使用类 SLIP 分帧：`0x7E` 同时作为一帧的开始和结束标记。帧内容中的
-`0x7E` 和 `0x7D` 分别编码为 `0x7D 0x5E` 和 `0x7D 0x5D`。
+UART 帧以固定两字节帧头 `0xA5 0x5A` 开始，**没有帧尾，也不使用字节转义**。接收端
+读取帧头后的固定头，从 `payload_length` 得到剩余读取长度，再校验 CRC。payload 中出现
+`0xA5 0x5A` 时按普通数据处理；CRC、长度错误或接收超时时重新扫描下一个帧头。
 
 ## 通用帧格式
 
 | 字段 | 大小 | 说明 |
 |---|---:|---|
+| `frame_magic` | 2 字节 | 固定为 `0xA5 0x5A`，不参与 CRC |
 | `protocol_version` | u8 | 固定为 `2` |
 | `message_type` | u8 | 消息类型，见下表 |
 | `sequence` | u16 | 发送方序列号，按 `65536` 取模递增 |
 | `payload_length` | u16 | payload 长度，范围 `0`-`4096` 字节 |
 | `payload` | 可变 | 与消息类型对应的内容 |
-| `crc` | u16 | 帧头与 payload 的 CRC-16/CCITT-FALSE；初值 `0xFFFF`，多项式 `0x1021` |
+| `crc` | u16 | `protocol_version` 至 payload 的 CRC-16/CCITT-FALSE；初值 `0xFFFF`，多项式 `0x1021` |
 
 接收端必须拒绝 CRC、版本、长度或消息类型不合法的帧。需要确认的命令通过
 `ACK` 中携带的原命令序列号匹配。

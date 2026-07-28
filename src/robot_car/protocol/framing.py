@@ -1,4 +1,4 @@
-"""SLIP-like UART framing and CRC-16/CCITT validation."""
+"""Length-delimited UART framing with an A5 5A sync word and CRC-16/CCITT."""
 
 from __future__ import annotations
 
@@ -8,9 +8,7 @@ from typing import List
 from .messages import MessageType, PROTOCOL_VERSION, ProtocolMessage
 
 
-SOF = 0x7E
-ESC = 0x7D
-ESC_XOR = 0x20
+MAGIC = b"\xA5\x5A"
 HEADER = struct.Struct(">BBHH")
 CRC = struct.Struct(">H")
 MAX_PAYLOAD = 4096
@@ -34,14 +32,7 @@ def encode_frame(message: ProtocolMessage) -> bytes:
         raise ProtocolError("payload too large")
     raw = HEADER.pack(message.version, int(message.message_type), message.sequence, len(message.payload)) + message.payload
     raw += CRC.pack(crc16_ccitt(raw))
-    escaped = bytearray([SOF])
-    for byte in raw:
-        if byte in (SOF, ESC):
-            escaped.extend((ESC, byte ^ ESC_XOR))
-        else:
-            escaped.append(byte)
-    escaped.append(SOF)
-    return bytes(escaped)
+    return MAGIC + raw
 
 
 def decode_packet(packet: bytes) -> ProtocolMessage:
@@ -63,38 +54,45 @@ def decode_packet(packet: bytes) -> ProtocolMessage:
 
 
 class FrameDecoder:
-    """Incremental decoder; malformed packets are counted and discarded."""
+    """Incremental length-based decoder; malformed candidates are resynchronized."""
 
     def __init__(self) -> None:
         self._buffer = bytearray()
-        self._in_frame = False
-        self._escaped = False
         self.errors = 0
 
     def feed(self, data: bytes) -> List[ProtocolMessage]:
+        self._buffer.extend(data)
         messages: List[ProtocolMessage] = []
-        for byte in data:
-            if byte == SOF:
-                if self._in_frame and self._buffer:
-                    try:
-                        messages.append(decode_packet(bytes(self._buffer)))
-                    except ProtocolError:
-                        self.errors += 1
-                self._buffer.clear()
-                self._in_frame = True
-                self._escaped = False
-                continue
-            if not self._in_frame:
-                continue
-            if self._escaped:
-                self._buffer.append(byte ^ ESC_XOR)
-                self._escaped = False
-            elif byte == ESC:
-                self._escaped = True
-            elif len(self._buffer) <= MAX_PAYLOAD + HEADER.size + CRC.size:
-                self._buffer.append(byte)
-            else:
+        minimum_size = len(MAGIC) + HEADER.size + CRC.size
+        while True:
+            start = self._buffer.find(MAGIC)
+            if start < 0:
+                # Retain a possible first sync byte across receive calls.
+                if self._buffer[-1:] == MAGIC[:1]:
+                    del self._buffer[:-1]
+                else:
+                    self._buffer.clear()
+                return messages
+            if start:
+                del self._buffer[:start]
+            if len(self._buffer) < minimum_size:
+                return messages
+            header_start = len(MAGIC)
+            _, _, _, payload_length = HEADER.unpack(
+                self._buffer[header_start:header_start + HEADER.size])
+            if payload_length > MAX_PAYLOAD:
                 self.errors += 1
-                self._buffer.clear()
-                self._in_frame = False
+                del self._buffer[0]
+                continue
+            frame_size = len(MAGIC) + HEADER.size + payload_length + CRC.size
+            if len(self._buffer) < frame_size:
+                return messages
+            try:
+                messages.append(decode_packet(bytes(self._buffer[len(MAGIC):frame_size])))
+            except ProtocolError:
+                self.errors += 1
+                # A valid sync word may follow corrupted bytes.
+                del self._buffer[0]
+            else:
+                del self._buffer[:frame_size]
         return messages

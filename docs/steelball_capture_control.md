@@ -67,7 +67,7 @@ flowchart TB
     A[应用语义层<br/>BALL_TARGET / CAPTURE_ARM / CAPTURE_CANCEL<br/>events.py, control_arbiter.py] -->
     B[目标表示层<br/>相对电磁铁: bearing_mdeg, range_mm, TTL<br/>capture_target.py, steelball_geometry.py] -->
     C[运动意图层<br/>CMD_MOTION: mode / flags / polar payload<br/>protocol/messages.py, protocol/protocol_v2.md] -->
-    D[帧与可靠性层<br/>sequence, ACK, CRC-16, SLIP, 失效时间<br/>protocol/framing.py, vehicle_link/gateway.py] -->
+    D[帧与可靠性层<br/>A5 5A, sequence, ACK, CRC-16, 失效时间<br/>protocol/framing.py, vehicle_link/gateway.py] -->
     E[链路层<br/>FakeTransport / UART / CAN 分段<br/>vehicle_link/*_transport.py] -->
     F[执行与安全层<br/>MSPM0 目标伺服、编码器闭环、PWM、急停、超时停车]
 ```

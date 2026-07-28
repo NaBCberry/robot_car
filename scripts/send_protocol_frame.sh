@@ -150,17 +150,6 @@ def crc16_ccitt(data: bytes) -> int:
     return crc
 
 
-def slip_encode(data: bytes) -> bytes:
-    encoded = bytearray([0x7E])
-    for byte in data:
-        if byte in (0x7E, 0x7D):
-            encoded.extend((0x7D, byte ^ 0x20))
-        else:
-            encoded.append(byte)
-    encoded.append(0x7E)
-    return bytes(encoded)
-
-
 repeat_count = number(repeat, "repeat", 0xFFFFFFFF)
 interval = number(interval_ms, "interval-ms", 0xFFFFFFFF)
 if repeat_count == 0:
@@ -178,7 +167,7 @@ else:
     if kind in {0x01, 0x02} and allow_control != "1":
         raise SystemExit("控制类消息需要 --unsafe-allow-control")
     body = struct.pack(">BBHH", 2, kind, seq, len(payload)) + payload
-    frame = slip_encode(body + struct.pack(">H", crc16_ccitt(body)))
+    frame = b"\xA5\x5A" + body + struct.pack(">H", crc16_ccitt(body))
     description = f"协议帧 type=0x{kind:02X} sequence={seq} payload={len(payload)}B"
 
 print(description)

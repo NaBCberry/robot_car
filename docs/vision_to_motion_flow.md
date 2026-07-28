@@ -24,7 +24,7 @@ flowchart TD
     J --> K[单一 MotionTarget<br/>control_arbiter.py / motion_target.py]
     K --> L[唯一网关<br/>vehicle_link/gateway.py]
     L --> M[v2 CMD_MOTION<br/>protocol/messages.py]
-    M --> N[SLIP/CRC 或 CAN 分段<br/>protocol/framing.py]
+    M --> N[A5 5A/长度/CRC 或 CAN 分段<br/>protocol/framing.py]
     N --> O[UART / CAN / FakeTransport]
     O --> P[MSPM0<br/>本地策略、闭环、急停和 PWM]
 ```

@@ -3,8 +3,8 @@ import unittest
 
 from robot_car.decision.capture_target import CaptureTarget
 from robot_car.decision.motion_target import MotionTarget
-from robot_car.protocol.framing import (CRC, HEADER, FrameDecoder, ProtocolError, crc16_ccitt,
-                                        decode_packet, encode_frame)
+from robot_car.protocol.framing import (CRC, HEADER, MAGIC, FrameDecoder, ProtocolError,
+                                        crc16_ccitt, decode_packet, encode_frame)
 from robot_car.protocol.messages import (MOTION_COMMON_STRUCT, MOTION_FLAG_ENABLED,
                                          MessageType, MotionMode, PROTOCOL_VERSION,
                                          ProtocolMessage, pack_ack, pack_motion, unpack_ack,
@@ -14,9 +14,21 @@ from robot_car.vehicle_link.gateway import VehicleGateway
 
 
 class ProtocolTests(unittest.TestCase):
-    def test_round_trip_and_escaped_bytes(self):
-        message = ProtocolMessage(MessageType.CMD_EVENT, 0x7E, b"a\x7d\x7eb")
-        self.assertEqual(FrameDecoder().feed(encode_frame(message)), [message])
+    def test_round_trip_and_magic_bytes_in_payload(self):
+        message = ProtocolMessage(MessageType.CMD_EVENT, 0x7E, b"a\xa5\x5ab")
+        frame = encode_frame(message)
+        self.assertTrue(frame.startswith(MAGIC))
+        decoder = FrameDecoder()
+        self.assertEqual(decoder.feed(frame[:5]), [])
+        self.assertEqual(decoder.feed(frame[5:]), [message])
+
+    def test_crc_failure_resynchronizes_to_next_magic_word(self):
+        bad = bytearray(encode_frame(ProtocolMessage(MessageType.HEARTBEAT, 1, b"bad")))
+        bad[-1] ^= 1
+        good = ProtocolMessage(MessageType.HEARTBEAT, 2, b"good")
+        decoder = FrameDecoder()
+        self.assertEqual(decoder.feed(bytes(bad) + encode_frame(good)), [good])
+        self.assertEqual(decoder.errors, 1)
 
     def test_crc_error_is_rejected(self):
         body = HEADER.pack(PROTOCOL_VERSION, int(MessageType.HEARTBEAT), 4, 1) + b"x"

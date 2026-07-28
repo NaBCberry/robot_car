@@ -4,7 +4,7 @@
 的前提下，把摄像头/视觉与车控通信拆为两个进程：
 
 ```text
-camera -> visiond -> VisionEvent/Unix Socket -> vehicled -> protocol v1 -> MSPM0
+camera -> visiond -> VisionEvent/Unix Socket -> vehicled -> protocol v2 -> MSPM0
                 \-> read-only HTTP debug API
 ```
 
@@ -76,7 +76,7 @@ robot_car/
 │       ├── protocol/                  # RDK 与 MSPM0 共用的协议语义
 │       │   ├── __init__.py            # 导出协议编解码公共 API
 │       │   ├── messages.py            # 消息枚举及 motion、ACK、JSON payload 编解码
-│       │   ├── framing.py             # SLIP 风格分帧、CRC-16 和增量解码器
+│       │   ├── framing.py             # A5 5A/长度分帧、CRC-16 和增量解码器
 │       │   └── protocol_v2.md         # 固件与 Python 端共同遵循的字节级协议文档
 │       ├── vehicle_link/              # 真实硬件与 FakeTransport 的统一通信层
 │       │   ├── __init__.py            # vehicle_link 子包声明
@@ -227,7 +227,7 @@ YOLO adapter 复用现有 `YOLO26Detect.predict(frame)`；OCR adapter 复用现�
 协议见 `src/robot_car/protocol/protocol_v2.md`。先保持车轮悬空、MSPM0
 硬件急停有效，并按以下顺序联调：
 
-1. MSPM0 实现 SLIP 分帧、CRC-16/CCITT、长度/版本检查和序列统计。
+1. MSPM0 实现 A5 5A 帧头扫描、长度读取、CRC-16/CCITT、版本检查和序列统计。
 2. 实现 `CMD_MOTION`、`CMD_EVENT`、`HEARTBEAT`、`TELEMETRY`、`ACK`、
    `FAULT`，并为命令返回匹配 sequence 的 ACK。
 3. MSPM0 对心跳和运动目标分别执行有效期超时，任一超时均自主安全停车；
