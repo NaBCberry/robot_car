@@ -37,12 +37,14 @@ robot_car/
 │       └── robot-vision.service       # visiond 服务模板，依赖 vehicle 服务
 ├── scripts/                           # 日常启动和只读诊断入口
 │   ├── diagnose_hardware.sh           # 只读列举 Python、视频、串口和 CAN 候选资源
+│   ├── send_protocol_frame.sh          # 显式确认后向指定 UART 发送一帧协议测试数据
 │   ├── run_vehicled.sh                # 设置工作目录/PYTHONPATH 后启动 vehicled
 │   └── run_visiond.sh                 # 设置工作目录/PYTHONPATH 后启动 visiond
 ├── src/
 │   └── robot_car/                     # 应用主 Python 包
 │       ├── __init__.py                # 包版本和包级说明
 │       ├── config.py                  # YAML 合并、关键参数校验和运行目录创建
+│       ├── protocol_sender.py          # UART 单帧协议测试工具；默认仅打印编码结果
 │       ├── visiond.py                 # 单摄像头所有者、插件调度、事件发布和调试 API
 │       ├── vehicled.py                # 视觉订阅、状态机、心跳和 MSPM0 唯一通信出口
 │       ├── camera/                    # 摄像头采集层
@@ -158,7 +160,33 @@ python3 -m robot_car.visiond --config-dir config --simulate
 - `GET http://127.0.0.1:8090/api/metrics`
 
 网页接口仅用于观测，车控不解析 MJPEG，也不轮询 HTTP。运行脚本为
-`scripts/run_vehicled.sh` 和 `scripts/run_visiond.sh`。
+`scripts/run_vehicled.sh`、`scripts/run_visiond.sh` 和
+`scripts/send_protocol_frame.sh`。
+
+## UART 协议单帧测试
+
+`scripts/send_protocol_frame.sh` 用于 MSPM0 协议联调。默认只输出 payload 和
+SLIP/CRC 编码后的帧，不会打开串口。`--send` 必须与
+`--i-understand-real-hardware`、明确的 `--device` 同时给出才会真实发送。
+
+发送自定义 `CMD_EVENT` JSON：
+
+```bash
+scripts/send_protocol_frame.sh --event-type DIAGNOSTIC --event-payload-json '{"request":"status"}'
+scripts/send_protocol_frame.sh --device /dev/ttySx --event-type DIAGNOSTIC \
+  --event-payload-json '{"request":"status"}' --send --i-understand-real-hardware
+```
+
+发送任意已有消息类型的原始 payload 时，使用十六进制字节并自行确保字段符合
+`protocol_v1.md`：
+
+```bash
+scripts/send_protocol_frame.sh --message-type 0x02 --payload-hex 7b7d
+```
+
+脚本不会猜测板上 UART 设备。先通过设备树、板卡引脚图和接线确认连接到 MSPM0
+的 RX/TX 对应设备，再填写 `--device`；当前默认配置的 `transport.uart.device`
+为空。
 
 运行测试：
 
