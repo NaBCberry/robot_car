@@ -62,9 +62,8 @@ if [[ ! "$baudrate" =~ ^[0-9]+$ ]] || ((baudrate <= 0)); then
 fi
 
 model_path=/userdata/rdkstudio/projects/ultralytics_yolo26/model/steelball_seg_bpu_bayese_640x640_nv12.bin
-calibration_path="$project_root/config/temporary_steelball_calibration.yaml"
-if [[ ! -f "$model_path" || ! -f "$calibration_path" ]]; then
-    echo "钢球模型或临时标定文件不存在" >&2
+if [[ ! -f "$model_path" ]]; then
+    echo "钢球模型不存在" >&2
     exit 2
 fi
 if ! python3 -c 'import serial' >/dev/null 2>&1; then
@@ -85,14 +84,14 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 PYTHONPATH="$project_root/src" python3 - "$project_root/config" "$runtime_config" \
-    "$camera_device" "$uart_device" "$baudrate" "$model_path" "$calibration_path" \
-    "$allow_motion" <<'PY'
+    "$camera_device" "$uart_device" "$baudrate" "$model_path" "$allow_motion" <<'PY'
 from pathlib import Path
+import math
 import sys
 
 import yaml
 
-(source_dir, output_dir, camera, uart, baudrate, model, calibration, allow_motion) = sys.argv[1:]
+(source_dir, output_dir, camera, uart, baudrate, model, allow_motion) = sys.argv[1:]
 source = Path(source_dir)
 output = Path(output_dir)
 documents = {}
@@ -104,6 +103,15 @@ documents["camera.yaml"]["camera"].update({
     "enabled": True, "device": camera, "width": 1280, "height": 720, "fps": 30,
     "pixel_format": "MJPG",
 })
+calibration = documents["camera.yaml"]["camera"].get("calibration", {})
+homography = calibration.get("image_to_capture_homography", [])
+try:
+    valid_homography = (isinstance(homography, list) and len(homography) == 9
+                        and all(math.isfinite(float(value)) for value in homography))
+except (TypeError, ValueError):
+    valid_homography = False
+if not valid_homography:
+    raise SystemExit("camera.yaml 中缺少有效的 camera.calibration.image_to_capture_homography")
 vision = documents["vision.yaml"]["vision"]
 vision["confirmation_frames"] = 1
 for plugin in vision.get("plugins", []):
@@ -111,8 +119,8 @@ for plugin in vision.get("plugins", []):
     if plugin.get("name") == "steelball":
         plugin["config"].update({
             "model_path": model,
-            "calibration_path": calibration,
-            "image_to_capture_homography": [],
+            "calibration_path": "",
+            "image_to_capture_homography": homography,
         })
 vehicle = documents["vehicle.yaml"]["vehicle"]
 vehicle["control_enabled"] = True

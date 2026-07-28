@@ -8,3 +8,18 @@ camera:
   pixel_format: MJPG
   test_image: ""
   reconnect_delay_ms: 1000
+  calibration:
+    # TEMPORARY ONLY: affine approximation for a 1280x720 image. It maps the
+    # steel-ball bbox bottom-center (u, v) to the electromagnet capture frame:
+    # forward_mm = 1200 - 1.5 * v; lateral_mm = 1.2 * u - 768.
+    # Replace with a measured ground-plane homography before authorizing motion.
+    image_to_capture_homography:
+      - 0.0
+      - -1.5
+      - 1200.0
+      - 1.2
+      - 0.0
+      - -768.0
+      - 0.0
+      - 0.0
+      - 1.0

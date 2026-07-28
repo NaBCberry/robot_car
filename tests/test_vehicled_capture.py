@@ -64,6 +64,35 @@ class VehicleDaemonCaptureTests(unittest.TestCase):
         self.assertTrue(polar[0]["target_valid"])
         self.assertEqual(polar[0]["range_mm"], 680)
 
+    def test_transport_heartbeat_switch_suppresses_heartbeat_frames(self):
+        now_ms = time.monotonic_ns() // 1_000_000
+        config = {
+            "runtime": {"vision_socket": "/tmp/not-used.sock"},
+            "transport": {"heartbeat": {"enabled": False}},
+            "vehicle": {
+                "control_enabled": True,
+                "initial_mode": "LINE_FOLLOW",
+                "default_valid_for_ms": 200,
+                "heartbeat_hz": 1000,
+                "vision_timeout_ms": 500,
+                "link_timeout_ms": 500,
+                "capture": {"enabled": True, "target_timeout_ms": 200,
+                            "feedback": {"enabled": False}},
+            },
+        }
+        transport = FakeTransport()
+        daemon = VehicleDaemon(config, transport)
+        event = VisionEvent(now_ms, "steelball", "BALL_TARGET", 0.94, {
+            "track_id": 17, "bearing_mdeg": -12000, "range_mm": 680,
+        }, 8, 150, 1280, 720)
+        daemon.subscriber = OneEventSubscriber(daemon, event)
+
+        daemon.run()
+
+        decoder = FrameDecoder()
+        messages = [message for frame in transport.sent for message in decoder.feed(frame)]
+        self.assertFalse(any(message.message_type == MessageType.HEARTBEAT for message in messages))
+
 
 if __name__ == "__main__":
     unittest.main()

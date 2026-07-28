@@ -53,10 +53,13 @@ class VehicleDaemon:
         self.gateway.open()
         self.state_machine.start()
         heartbeat_hz = max(1.0, float(self.config["vehicle"].get("heartbeat_hz", 20)))
+        heartbeat_enabled = bool(self.config.get("transport", {}).get("heartbeat", {}).get(
+            "enabled", True))
         interval = 1.0 / heartbeat_hz
         next_send = time.monotonic()
-        LOG.info("vehicled started; transport=%s control_enabled=%s",
-                 type(self.transport).__name__, self.config["vehicle"].get("control_enabled", False))
+        LOG.info("vehicled started; transport=%s control_enabled=%s heartbeat_enabled=%s",
+                 type(self.transport).__name__, self.config["vehicle"].get("control_enabled", False),
+                 heartbeat_enabled)
         try:
             while not self.stop_event.is_set():
                 event = self.subscriber.receive(timeout=min(interval, 0.05))
@@ -74,7 +77,8 @@ class VehicleDaemon:
                                                  str(telemetry.get("fault", "")), now_ms)
                 now = time.monotonic()
                 if now >= next_send:
-                    self.gateway.send_heartbeat()
+                    if heartbeat_enabled:
+                        self.gateway.send_heartbeat()
                     motion = self.control_arbiter.select(now_ms, self.state_machine.target(now_ms))
                     self.gateway.send_motion(motion)
                     next_send = now + interval

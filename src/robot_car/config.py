@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import math
 from pathlib import Path
 from typing import Any, Dict
 
@@ -16,7 +17,8 @@ SAFE_DEFAULTS: Dict[str, Any] = {
         "vision_socket": "/userdata/robot-car/runtime/vision.sock",
     },
     "web": {"enabled": False, "host": "127.0.0.1", "port": 8090},
-    "camera": {"enabled": False, "device": "", "width": 640, "height": 480, "fps": 10},
+    "camera": {"enabled": False, "device": "", "width": 640, "height": 480, "fps": 10,
+               "calibration": {"image_to_capture_homography": []}},
     "vision": {"confirmation_frames": 3, "default_ttl_ms": 150, "plugins": []},
     "vehicle": {
         "control_enabled": False,
@@ -37,6 +39,7 @@ SAFE_DEFAULTS: Dict[str, Any] = {
     "transport": {
         "enabled": False,
         "type": "fake",
+        "heartbeat": {"enabled": True},
         "uart": {"device": ""},
         "can": {"interface": "", "channel": "", "ids": {}},
     },
@@ -84,6 +87,23 @@ def _validate_safe(config: Dict[str, Any]) -> None:
             raise ValueError("enabled UART transport requires transport.uart.device")
         if kind == "can" and not transport.get("can", {}).get("channel"):
             raise ValueError("enabled CAN transport requires transport.can.channel")
+    heartbeat = transport.get("heartbeat", {})
+    if not isinstance(heartbeat, dict) or not isinstance(heartbeat.get("enabled", True), bool):
+        raise ValueError("transport.heartbeat.enabled must be a YAML boolean")
+    calibration = camera.get("calibration", {})
+    if not isinstance(calibration, dict):
+        raise ValueError("camera.calibration must be a mapping")
+    homography = calibration.get("image_to_capture_homography", [])
+    if not isinstance(homography, list):
+        raise ValueError("camera.calibration.image_to_capture_homography must be a list")
+    if homography:
+        if len(homography) != 9:
+            raise ValueError("camera.calibration.image_to_capture_homography must contain 9 values")
+        try:
+            if not all(math.isfinite(float(value)) for value in homography):
+                raise ValueError
+        except (TypeError, ValueError) as error:
+            raise ValueError("camera.calibration.image_to_capture_homography must be finite") from error
     validity = int(vehicle.get("default_valid_for_ms", 0))
     if not 0 < validity <= 0xFFFF:
         raise ValueError("vehicle.default_valid_for_ms must fit uint16 and be positive")

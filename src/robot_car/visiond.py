@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import logging
 import signal
 import threading
@@ -32,7 +33,17 @@ class VisionDaemon:
         self.simulate = simulate
         self.stop_event = threading.Event()
         self.camera = CameraCapture(config["camera"])
-        plugins = [create_plugin(item) for item in config["vision"].get("plugins", [])]
+        calibration = config["camera"].get("calibration", {}).get(
+            "image_to_capture_homography", [])
+        plugin_configs = []
+        for item in config["vision"].get("plugins", []):
+            plugin_config = copy.deepcopy(item)
+            if plugin_config.get("type") == "steelball_segmentation" and calibration:
+                options = plugin_config.setdefault("config", {})
+                options["image_to_capture_homography"] = calibration
+                options["calibration_path"] = ""
+            plugin_configs.append(plugin_config)
+        plugins = [create_plugin(item) for item in plugin_configs]
         default_ttl = int(config["vision"].get("default_ttl_ms", 150))
         for plugin in plugins:
             plugin.config.setdefault("ttl_ms", default_ttl)

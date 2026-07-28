@@ -28,11 +28,10 @@ robot_car/
 │   └── steelball_uart_bringup.md      # 最下方钢球识别、临时标定和真实 UART 联调说明
 ├── config/                            # 所有可部署参数，硬件路径不写死在代码中
 │   ├── base.yaml                      # 运行数据根目录、日志级别、UDS 和调试 Web 配置
-│   ├── camera.yaml                    # 摄像头启停、设备、分辨率、帧率和像素格式
+│   ├── camera.yaml                    # 摄像头启停、设备、图像参数及钢球捕获坐标标定
 │   ├── vision.yaml                    # 视觉插件列表、频率、优先级、BPU 和确认策略
 │   ├── vehicle.yaml                   # 状态机、车控总开关、心跳和超时参数
-│   ├── transport.yaml                 # Fake/UART/CAN 类型、端口、波特率和 CAN ID
-│   └── temporary_steelball_calibration.yaml # 临时图像到电磁铁坐标映射，仅供输出联调
+│   └── transport.yaml                 # Fake/UART/CAN 类型、端口、波特率、CAN ID 和心跳开关
 ├── deploy/
 │   └── systemd/                       # 仅供人工部署的 systemd 模板，不自动安装
 │       ├── robot-vehicle.service      # vehicled 服务模板，要求先启动
@@ -130,6 +129,8 @@ robot_car/
 
 - `camera.enabled: false` 且设备名为空，不会默认打开摄像头。
 - `transport.enabled: false`，UART 设备与 CAN 通道/ID 均为空。
+- `transport.heartbeat.enabled: true` 默认周期发送协议心跳；关闭它只抑制 `HEARTBEAT`
+  帧，不会停止 `CMD_MOTION`，因此必须与 MSPM0 的超时停车策略一致。
 - `vehicle.control_enabled: false`，网关强制发送禁用运动模式。
 - `vehicle.capture.enabled: false`；即使启用钢球插件，也不会下发有效捕获目标。
 - `vehicle.capture.output_only: false` 是额外的极坐标输出保护开关。生产联调脚本会把

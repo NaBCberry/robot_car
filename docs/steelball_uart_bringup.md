@@ -1,7 +1,7 @@
 # 最下方钢球 UART 生产联调
 
 本页给出真实相机、YOLO26Seg 钢球模型和 MSPM0 UART 的联调入口。它不修改
-`ultralytics_yolo26` 模型仓库，也不改写项目的 `config/transport.yaml`。
+`ultralytics_yolo26` 模型仓库，也不改写项目的配置文件。
 
 ## 默认输出模式
 
@@ -37,15 +37,23 @@ range_mm = hypot(forward_mm, lateral_mm)
 
 `Ctrl-C` 会停止两个守护进程；车辆通信进程退出时会再发送一个禁用目标。
 
+## 心跳开关
+
+`config/transport.yaml` 中的 `transport.heartbeat.enabled` 默认是 `true`。设为 `false`
+后，`vehicled` 不再发送协议 `HEARTBEAT` 帧，但仍按原有频率发送 `CMD_MOTION`。只有在
+MSPM0 已明确不依赖该心跳维持运行，或需要单独验证运动帧时才应关闭；若固件将心跳超时
+视为停车条件，关闭后应预期车辆进入安全停车。
+
 ## 临时标定限制
 
-临时参数保存在 `config/temporary_steelball_calibration.yaml`，针对 1280x720 图像，仅为
-本次联调提供一个可观察的数值映射。它不是相机标定结果，不能保证真实距离、左右方向或
-电磁铁捕获位置准确。
+临时参数保存在 `config/camera.yaml` 的
+`camera.calibration.image_to_capture_homography`，针对 1280x720 图像，仅为本次联调
+提供一个可观察的数值映射。它不是相机标定结果，不能保证真实距离、左右方向或电磁铁
+捕获位置准确。
 
 后续标定网页应采集多个已经测量的钢球地面位置 `(forward_mm, lateral_mm)` 与对应像素
-底边中点，拟合并验证 `image_to_capture_homography`。网页产出一个包含这 9 个数值的 YAML
-文件，替代临时文件路径后才能作为真实运动依据。
+底边中点，拟合并验证 `image_to_capture_homography`。网页应直接更新 `camera.yaml` 中
+这 9 个数值，完成验证后才能作为真实运动依据。
 
 ## 允许实际运动
 

@@ -3,9 +3,29 @@ import unittest
 from robot_car.camera.frame import CameraFrame
 from robot_car.perception.steelball_adapter import SteelballAdapter
 from robot_car.perception.steelball_geometry import ImageToCaptureProjector
+from robot_car.visiond import VisionDaemon
 
 
 class SteelballGeometryTests(unittest.TestCase):
+    def test_visiond_injects_camera_calibration_into_steelball_plugin(self):
+        homography = [1, 0, 0, 0, 1, 0, 0, 0, 1]
+        daemon = VisionDaemon({
+            "camera": {"enabled": False, "calibration": {
+                "image_to_capture_homography": homography,
+            }},
+            "runtime": {"vision_socket": "/tmp/not-used.sock"},
+            "vision": {"plugins": [{
+                "name": "steelball", "enabled": False, "type": "steelball_segmentation",
+                "config": {"image_to_capture_homography": []},
+            }]},
+        })
+        try:
+            adapter = daemon.scheduler.slots[0].plugin
+            self.assertEqual(adapter.config["config"]["image_to_capture_homography"], homography)
+            self.assertEqual(adapter.config["config"]["calibration_path"], "")
+        finally:
+            daemon.close()
+
     def test_adapter_prefers_lowest_ball_over_higher_confidence(self):
         adapter = SteelballAdapter("steelball", {"config": {"target_class_id": 0}})
         selected = adapter._select_primary(
