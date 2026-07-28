@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import logging
 import sys
 import time
 from pathlib import Path
@@ -43,6 +44,9 @@ class SteelballAdapter(VisionPlugin):
         if str(RUNTIME_DIR) not in sys.path:
             sys.path.insert(0, str(RUNTIME_DIR))
         module = importlib.import_module(f"yolo26_{model_type}")
+        # The reusable runtime reports three timing lines for every frame.  At camera rate
+        # that console I/O is unnecessary overhead; warnings and errors remain visible.
+        logging.getLogger("YOLO26").setLevel(logging.WARNING)
         config_type = module.YOLO26SegConfig if model_type == "seg" else module.YOLO26Config
         model_class = module.YOLO26Seg if model_type == "seg" else module.YOLO26Detect
         model_config = config_type(

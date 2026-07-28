@@ -140,6 +140,8 @@ for plugin in vision.get("plugins", []):
             "calibration_path": "",
             "image_to_capture_homography": homography,
         })
+        if model_type == "det":
+            plugin.update({"interval_ms": 33, "max_processing_ms": 80})
 vehicle = documents["vehicle.yaml"]["vehicle"]
 vehicle["control_enabled"] = True
 vehicle["initial_mode"] = "IDLE"

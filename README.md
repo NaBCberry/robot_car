@@ -173,7 +173,7 @@ python3 -m robot_car.visiond --config-dir config --simulate
 实时相机画面、钢球识别框、方位角和距离。
 
 页面通过 `GET /video_feed` 持续接收 MJPEG；状态和识别结果每 500 ms 刷新一次。网页专用
-编码默认限制为 12 FPS、最大宽度 960 像素、JPEG 质量 80，可在 `base.yaml` 的 `web` 下通过
+编码默认限制为 25 FPS、最大宽度 640 像素、JPEG 质量 75，可在 `base.yaml` 的 `web` 下通过
 `preview_fps`、`preview_width`、`jpeg_quality` 调整。网页接口仅用于观测，车控不解析 MJPEG，
 也不轮询 HTTP。运行脚本为
 `scripts/run_vehicled.sh` 和 `scripts/run_visiond.sh`。

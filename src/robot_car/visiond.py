@@ -62,6 +62,7 @@ class VisionDaemon:
         self._latest_frame_jpeg: Optional[bytes] = None
         self._preview_sequence = 0
         self._next_preview_ms = 0
+        self._preview_events: List[VisionEvent] = []
 
     def start(self) -> None:
         self.publisher.start()
@@ -100,7 +101,8 @@ class VisionDaemon:
                     events, observed_sources = self.scheduler.process_latest(frame, now)
                     confirmed_events = self.stabilizer.update(events, now, observed_sources)
                     self._publish(confirmed_events)
-                    self._update_preview(frame, confirmed_events)
+                    self._update_preview(frame, self._overlay_events(
+                        confirmed_events, observed_sources, now))
                 health_interval = int(self.config["vision"].get("health_interval_ms", 100))
                 if (self.camera.enabled and not self.camera.error and self.last_frame_ms is not None
                         and now - self.last_frame_ms <= int(self.config["vehicle"].get("vision_timeout_ms", 500))
@@ -145,12 +147,23 @@ class VisionDaemon:
                 return after_sequence, None
             return self._preview_sequence, self._latest_frame_jpeg
 
+    def _overlay_events(self, events: List[VisionEvent], observed_sources: set[str],
+                        now_ms: int) -> List[VisionEvent]:
+        """Keep each source's latest confirmed detection visible until it expires or is absent."""
+        if observed_sources:
+            self._preview_events = [event for event in self._preview_events
+                                    if event.source not in observed_sources]
+        self._preview_events.extend(events)
+        self._preview_events = [event for event in self._preview_events
+                                if not event.is_expired(now_ms)]
+        return self._preview_events.copy()
+
     def _update_preview(self, frame: CameraFrame, events: List[VisionEvent]) -> None:
         if not self.web_enabled:
             return
         now = monotonic_ms()
         web_config = self.config.get("web", {})
-        interval_ms = max(1, round(1000 / float(web_config.get("preview_fps", 12))))
+        interval_ms = max(1, round(1000 / float(web_config.get("preview_fps", 25))))
         if now < self._next_preview_ms:
             return
         self._next_preview_ms = now + interval_ms
@@ -158,11 +171,11 @@ class VisionDaemon:
             import cv2
 
             image = draw_overlay(frame.image, events)
-            preview_width = int(web_config.get("preview_width", 960))
+            preview_width = int(web_config.get("preview_width", 640))
             if image.shape[1] > preview_width:
                 preview_height = round(image.shape[0] * preview_width / image.shape[1])
                 image = cv2.resize(image, (preview_width, preview_height), interpolation=cv2.INTER_AREA)
-            quality = int(web_config.get("jpeg_quality", 80))
+            quality = int(web_config.get("jpeg_quality", 75))
             encoded, jpeg = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, quality])
             if encoded:
                 with self._preview_lock:

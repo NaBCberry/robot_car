@@ -7,10 +7,25 @@ from unittest.mock import patch
 from robot_car.camera.frame import CameraFrame
 from robot_car.perception.steelball_adapter import SteelballAdapter
 from robot_car.perception.steelball_geometry import ImageToCaptureProjector
+from robot_car.perception.events import VisionEvent
 from robot_car.visiond import VisionDaemon
 
 
 class SteelballGeometryTests(unittest.TestCase):
+    def test_preview_keeps_latest_event_between_inferences(self):
+        daemon = VisionDaemon({
+            "camera": {"enabled": False, "calibration": {"image_to_capture_homography": []}},
+            "runtime": {"vision_socket": "/tmp/not-used.sock"},
+            "vision": {"plugins": []},
+        })
+        event = VisionEvent(1000, "steelball", "BALL_TARGET", 0.9, {}, 1, 150, 1280, 720, True)
+        try:
+            self.assertEqual(daemon._overlay_events([event], {"steelball"}, 1000), [event])
+            self.assertEqual(daemon._overlay_events([], set(), 1040), [event])
+            self.assertEqual(daemon._overlay_events([], {"steelball"}, 1080), [])
+        finally:
+            daemon.close()
+
     def test_adapter_uses_detection_runtime_for_det_model(self):
         created_configs = []
 

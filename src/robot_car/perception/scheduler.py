@@ -75,7 +75,7 @@ class PluginScheduler:
                     slot.next_run_ms = now_ms + min(30_000, 500 * (2 ** min(slot.failures, 6)))
                     LOG.warning("plugin %s exceeded %d ms; skipping new frames", slot.plugin.name,
                                 slot.max_processing_ms)
-                continue
+                    continue
             if now_ms >= slot.next_run_ms:
                 slot.started_ms = now_ms
                 slot.next_run_ms = now_ms + slot.interval_ms
