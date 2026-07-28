@@ -16,7 +16,8 @@ SAFE_DEFAULTS: Dict[str, Any] = {
         "log_level": "INFO",
         "vision_socket": "/userdata/robot-car/runtime/vision.sock",
     },
-    "web": {"enabled": False, "host": "127.0.0.1", "port": 8090},
+    "web": {"enabled": False, "host": "127.0.0.1", "port": 8090,
+            "preview_fps": 12, "preview_width": 960, "jpeg_quality": 80},
     "camera": {"enabled": False, "device": "", "width": 640, "height": 480, "fps": 10,
                "calibration": {"image_to_capture_homography": []}},
     "vision": {"confirmation_frames": 3, "default_ttl_ms": 150, "plugins": []},
@@ -83,6 +84,15 @@ def _validate_safe(config: Dict[str, Any]) -> None:
                          ("web.enabled", web.get("enabled"))):
         if not isinstance(value, bool):
             raise ValueError(f"{label} must be a YAML boolean")
+    preview_fps = float(web.get("preview_fps", 12))
+    if not 1 <= preview_fps <= 60:
+        raise ValueError("web.preview_fps must be between 1 and 60")
+    preview_width = int(web.get("preview_width", 960))
+    if preview_width < 160:
+        raise ValueError("web.preview_width must be at least 160")
+    jpeg_quality = int(web.get("jpeg_quality", 80))
+    if not 1 <= jpeg_quality <= 100:
+        raise ValueError("web.jpeg_quality must be between 1 and 100")
     if transport.get("enabled"):
         kind = transport.get("type")
         if kind == "uart" and not transport.get("uart", {}).get("device"):

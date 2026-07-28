@@ -53,6 +53,11 @@ web:
 将 `enabled` 改为 `false` 后，页面、HTTP 端口和 JPEG 编码均关闭，视觉识别与 UART
 发送不受影响。
 
+页面的视频区域使用 `GET /video_feed` 持续输出 MJPEG，不会每隔一段时间重新请求单张图片。
+`web.preview_fps`、`web.preview_width` 和 `web.jpeg_quality` 分别限制网页预览的帧率、宽度和
+编码质量；默认值为 12 FPS、960 像素和 80。它们只影响浏览器预览，不会改变模型输入、钢球
+极坐标解算或 UART 输出。
+
 ## 心跳开关
 
 `config/transport.yaml` 中的 `transport.heartbeat.enabled` 默认是 `true`。设为 `false`

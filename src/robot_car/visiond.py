@@ -58,8 +58,10 @@ class VisionDaemon:
         self.next_health_ms = 0
         self.web: Optional[DebugServer] = None
         self.web_enabled = bool(config.get("web", {}).get("enabled", False))
-        self._preview_lock = threading.Lock()
+        self._preview_lock = threading.Condition()
         self._latest_frame_jpeg: Optional[bytes] = None
+        self._preview_sequence = 0
+        self._next_preview_ms = 0
 
     def start(self) -> None:
         self.publisher.start()
@@ -70,7 +72,7 @@ class VisionDaemon:
             self.web = DebugServer(str(web_config.get("host", "127.0.0.1")),
                                    int(web_config.get("port", 8090)),
                                    self.status, self.results, self.metrics.snapshot,
-                                   self.preview_frame)
+                                   self.preview_frame, self.wait_for_preview_frame)
             self.web.start()
         LOG.info("visiond started; simulate=%s socket=%s", self.simulate, self.publisher.path)
 
@@ -133,17 +135,40 @@ class VisionDaemon:
         with self._preview_lock:
             return self._latest_frame_jpeg
 
+    def wait_for_preview_frame(self, after_sequence: int,
+                               timeout: float) -> tuple[int, Optional[bytes]]:
+        """Wait until a preview newer than ``after_sequence`` is available."""
+        with self._preview_lock:
+            self._preview_lock.wait_for(
+                lambda: self._preview_sequence > after_sequence or self.stop_event.is_set(), timeout)
+            if self._preview_sequence <= after_sequence:
+                return after_sequence, None
+            return self._preview_sequence, self._latest_frame_jpeg
+
     def _update_preview(self, frame: CameraFrame, events: List[VisionEvent]) -> None:
         if not self.web_enabled:
             return
+        now = monotonic_ms()
+        web_config = self.config.get("web", {})
+        interval_ms = max(1, round(1000 / float(web_config.get("preview_fps", 12))))
+        if now < self._next_preview_ms:
+            return
+        self._next_preview_ms = now + interval_ms
         try:
             import cv2
 
             image = draw_overlay(frame.image, events)
-            encoded, jpeg = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            preview_width = int(web_config.get("preview_width", 960))
+            if image.shape[1] > preview_width:
+                preview_height = round(image.shape[0] * preview_width / image.shape[1])
+                image = cv2.resize(image, (preview_width, preview_height), interpolation=cv2.INTER_AREA)
+            quality = int(web_config.get("jpeg_quality", 80))
+            encoded, jpeg = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, quality])
             if encoded:
                 with self._preview_lock:
                     self._latest_frame_jpeg = jpeg.tobytes()
+                    self._preview_sequence += 1
+                    self._preview_lock.notify_all()
         except Exception:
             LOG.exception("failed to generate web preview")
 

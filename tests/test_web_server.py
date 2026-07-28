@@ -2,7 +2,15 @@ import json
 import unittest
 from urllib.request import urlopen
 
-from robot_car.web.server import DebugServer
+from robot_car.web.server import DebugServer, mjpeg_part
+
+
+class MjpegPartTests(unittest.TestCase):
+    def test_mjpeg_part_contains_one_complete_jpeg_frame(self):
+        self.assertEqual(
+            mjpeg_part(b"preview-bytes"),
+            b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: 13\r\n\r\npreview-bytes\r\n",
+        )
 
 
 class DebugServerTests(unittest.TestCase):
@@ -14,6 +22,7 @@ class DebugServerTests(unittest.TestCase):
                 lambda: {"events": []},
                 lambda: {"frames_received": 1},
                 lambda: b"preview-bytes",
+                lambda sequence, _timeout: (1, b"preview-bytes") if sequence < 1 else (sequence, None),
             )
         except PermissionError:
             self.skipTest("sandbox disallows local TCP listeners")
@@ -29,11 +38,16 @@ class DebugServerTests(unittest.TestCase):
             page = response.read().decode("utf-8")
             self.assertEqual(response.headers["Content-Type"], "text/html; charset=utf-8")
         self.assertIn("钢球识别", page)
-        self.assertIn("/api/frame.jpg", page)
+        self.assertIn('src="/video_feed"', page)
 
         with urlopen(f"{self.base_url}/api/frame.jpg", timeout=1) as response:
             self.assertEqual(response.headers["Content-Type"], "image/jpeg")
             self.assertEqual(response.read(), b"preview-bytes")
+
+        with urlopen(f"{self.base_url}/video_feed", timeout=1) as response:
+            self.assertEqual(response.headers["Content-Type"], "multipart/x-mixed-replace; boundary=frame")
+            expected = mjpeg_part(b"preview-bytes")
+            self.assertEqual(response.read(len(expected)), expected)
 
         with urlopen(f"{self.base_url}/api/results", timeout=1) as response:
             self.assertEqual(json.loads(response.read()), {"events": []})

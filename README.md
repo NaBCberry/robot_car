@@ -91,7 +91,7 @@ robot_car/
 │       │   └── watchdog.py            # 基于单调时钟的链路接收超时判断
 │       ├── web/                       # 与车控无依赖的只读调试服务
 │       │   ├── __init__.py            # web 子包声明
-│       │   ├── server.py              # 实时识别页面、JPEG 预览及只读 JSON API
+│       │   ├── server.py              # 实时识别页面、MJPEG 视频流及只读 JSON API
 │       │   └── overlay.py             # 在网页预览叠加识别框和极坐标，不参与决策
 │       └── observability/             # 日志、指标和可选事件记录
 │           ├── __init__.py            # observability 子包声明
@@ -105,7 +105,7 @@ robot_car/
 │   ├── test_steelball_geometry.py     # 钢球图像坐标到捕获点坐标的解算
 │   ├── test_vehicled_capture.py       # 守护进程仅发送捕获链路，不发送有效普通运动
 │   ├── test_vision_ipc.py             # UDS 连接、事件传递、断线和重连
-│   └── test_web_server.py              # 实时识别页面、JPEG 预览与只读 API 路由
+│   └── test_web_server.py              # 实时识别页面、MJPEG 流与只读 API 路由
 └── tools/
     └── replay_recording.py            # 将 JSON-lines 录像事件重放到独立 UDS
 ```
@@ -133,7 +133,7 @@ robot_car/
 - `transport.heartbeat.enabled: true` 默认周期发送协议心跳；关闭它只抑制 `HEARTBEAT`
   帧，不会停止 `CMD_MOTION`，因此必须与 MSPM0 的超时停车策略一致。
 - `web.enabled` 位于 `config/base.yaml`，独立控制实时识别页面和只读 HTTP 服务；关闭后
-  UART 与视觉决策仍正常运行，且不会生成网页 JPEG 预览。
+  UART 与视觉决策仍正常运行，且不会生成网页 MJPEG 预览。
 - `vehicle.control_enabled: false`，网关强制发送禁用运动模式。
 - `vehicle.capture.enabled: false`；即使启用钢球插件，也不会下发有效捕获目标。
 - `vehicle.capture.output_only: false` 是额外的极坐标输出保护开关。生产联调脚本会把
@@ -172,7 +172,10 @@ python3 -m robot_car.visiond --config-dir config --simulate
 当 `config/base.yaml` 中 `web.enabled: true` 时，访问 `http://127.0.0.1:8090/` 可查看
 实时相机画面、钢球识别框、方位角和距离。
 
-网页接口仅用于观测，车控不解析 MJPEG，也不轮询 HTTP。运行脚本为
+页面通过 `GET /video_feed` 持续接收 MJPEG；状态和识别结果每 500 ms 刷新一次。网页专用
+编码默认限制为 12 FPS、最大宽度 960 像素、JPEG 质量 80，可在 `base.yaml` 的 `web` 下通过
+`preview_fps`、`preview_width`、`jpeg_quality` 调整。网页接口仅用于观测，车控不解析 MJPEG，
+也不轮询 HTTP。运行脚本为
 `scripts/run_vehicled.sh` 和 `scripts/run_visiond.sh`。
 
 ## UART 协议单帧测试
