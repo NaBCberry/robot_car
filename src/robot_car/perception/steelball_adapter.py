@@ -24,6 +24,7 @@ class SteelballAdapter(VisionPlugin):
     def __init__(self, name: str, config: Dict[str, Any]) -> None:
         super().__init__(name, config)
         self.model = None
+        self.model_type = "seg"
         self.error = ""
         self.last_inference_ms: Optional[float] = None
         self.projector: Optional[ImageToCaptureProjector] = None
@@ -32,20 +33,26 @@ class SteelballAdapter(VisionPlugin):
         options = self.config.get("config", {})
         model_path = Path(options.get("model_path", ""))
         if not str(model_path) or not model_path.is_file():
-            raise FileNotFoundError(f"steel-ball segmentation model is missing: {model_path}")
+            raise FileNotFoundError(f"steel-ball model is missing: {model_path}")
+        model_type = str(options.get("model_type", "seg")).lower()
+        if model_type not in {"seg", "det"}:
+            raise ValueError("steel-ball model_type must be 'seg' or 'det'")
         calibration = self._load_calibration(options)
         if calibration:
             self.projector = ImageToCaptureProjector(calibration)
         if str(RUNTIME_DIR) not in sys.path:
             sys.path.insert(0, str(RUNTIME_DIR))
-        module = importlib.import_module("yolo26_seg")
-        model_config = module.YOLO26SegConfig(
+        module = importlib.import_module(f"yolo26_{model_type}")
+        config_type = module.YOLO26SegConfig if model_type == "seg" else module.YOLO26Config
+        model_class = module.YOLO26Seg if model_type == "seg" else module.YOLO26Detect
+        model_config = config_type(
             model_path=str(model_path),
             classes_num=int(options.get("classes_num", 1)),
             score_thres=float(options.get("score_threshold", 0.25)),
             nms_thres=float(options.get("nms_threshold", 0.65)),
         )
-        self.model = module.YOLO26Seg(model_config)
+        self.model = model_class(model_config)
+        self.model_type = model_type
         self.model.set_scheduling_params(priority=int(self.config.get("priority", 0)),
                                          bpu_cores=self.config.get("bpu_cores"))
 
@@ -71,7 +78,11 @@ class SteelballAdapter(VisionPlugin):
         if self.model is None:
             return []
         started = time.monotonic()
-        boxes, scores, class_ids, _masks = self.model.predict(frame.image)
+        if self.model_type == "seg":
+            # The capture controller uses only bbox coordinates; masks add avoidable latency.
+            boxes, scores, class_ids, _masks = self.model.predict(frame.image, return_masks=False)
+        else:
+            boxes, scores, class_ids = self.model.predict(frame.image)
         self.last_inference_ms = (time.monotonic() - started) * 1000.0
         target = self._select_primary(boxes, scores, class_ids)
         if target is None:

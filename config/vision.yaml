@@ -38,8 +38,9 @@ vision:
       max_processing_ms: 90
       bpu_cores: [0]
       config:
-        # Supply the existing YOLO26 steel-ball segmentation .bin explicitly.
+        # Set model_type to det after supplying a matching YOLO26 steel-ball detection .bin.
         model_path: ""
+        model_type: seg
         classes_num: 1
         target_class_id: 0
         score_threshold: 0.25

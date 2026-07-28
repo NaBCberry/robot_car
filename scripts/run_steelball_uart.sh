@@ -6,6 +6,9 @@ project_root=$(cd "$(dirname "$0")/.." && pwd)
 camera_device=/dev/video0
 uart_device=/dev/ttyS1
 baudrate=115200
+model_type=seg
+model_path=/userdata/rdkstudio/projects/ultralytics_yolo26/model/steelball_seg_bpu_bayese_640x640_nv12.bin
+model_path_explicit=0
 allow_motion=0
 allow_temporary_calibration=0
 
@@ -13,6 +16,7 @@ usage() {
     cat <<'EOF'
 用法：
   run_steelball_uart.sh [--camera DEVICE] [--uart DEVICE] [--baudrate RATE]
+                         [--model-type seg|det] [--model-path MODEL.bin]
                          [--allow-motion --allow-temporary-calibration]
 
 默认行为：打开相机和 /dev/ttyS1，识别画面中最下方的钢球，并向 UART 持续发送
@@ -22,6 +26,8 @@ v2 CAPTURE_TARGET_POLAR 的角度和距离。默认强制 enabled=0，MSPM0 必�
   --camera DEVICE                    摄像头，默认 /dev/video0
   --uart DEVICE                      UART，默认 /dev/ttyS1
   --baudrate RATE                    UART 波特率，默认 115200
+  --model-type seg|det               钢球模型类型，默认 seg
+  --model-path MODEL.bin             对应模型路径；det 模式必须明确提供
   --allow-motion                     允许 MSPM0 根据目标驱动车辆
   --allow-temporary-calibration      确认目前使用的是临时标定，必须与 --allow-motion 同时给出
   -h, --help                         显示本帮助
@@ -33,6 +39,8 @@ while (($#)); do
         --camera) camera_device=$2; shift 2 ;;
         --uart) uart_device=$2; shift 2 ;;
         --baudrate) baudrate=$2; shift 2 ;;
+        --model-type) model_type=$2; shift 2 ;;
+        --model-path) model_path=$2; model_path_explicit=1; shift 2 ;;
         --allow-motion) allow_motion=1; shift ;;
         --allow-temporary-calibration) allow_temporary_calibration=1; shift ;;
         -h|--help) usage; exit 0 ;;
@@ -48,6 +56,14 @@ if ((allow_motion && !allow_temporary_calibration)); then
     echo "拒绝启动运动：临时标定必须同时传 --allow-temporary-calibration" >&2
     exit 2
 fi
+if [[ "$model_type" != "seg" && "$model_type" != "det" ]]; then
+    echo "--model-type 只能是 seg 或 det" >&2
+    exit 2
+fi
+if [[ "$model_type" == "det" && "$model_path_explicit" != 1 ]]; then
+    echo "det 模式必须用 --model-path 指定与钢球类别匹配的检测 .bin" >&2
+    exit 2
+fi
 if [[ ! -c "$camera_device" ]]; then
     echo "摄像头不是字符设备：$camera_device" >&2
     exit 2
@@ -60,8 +76,6 @@ if [[ ! "$baudrate" =~ ^[0-9]+$ ]] || ((baudrate <= 0)); then
     echo "--baudrate 必须为正整数" >&2
     exit 2
 fi
-
-model_path=/userdata/rdkstudio/projects/ultralytics_yolo26/model/steelball_seg_bpu_bayese_640x640_nv12.bin
 if [[ ! -f "$model_path" ]]; then
     echo "钢球模型不存在" >&2
     exit 2
@@ -84,14 +98,14 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 PYTHONPATH="$project_root/src" python3 - "$project_root/config" "$runtime_config" \
-    "$camera_device" "$uart_device" "$baudrate" "$model_path" "$allow_motion" <<'PY'
+    "$camera_device" "$uart_device" "$baudrate" "$model_path" "$model_type" "$allow_motion" <<'PY'
 from pathlib import Path
 import math
 import sys
 
 import yaml
 
-(source_dir, output_dir, camera, uart, baudrate, model, allow_motion) = sys.argv[1:]
+(source_dir, output_dir, camera, uart, baudrate, model, model_type, allow_motion) = sys.argv[1:]
 source = Path(source_dir)
 output = Path(output_dir)
 documents = {}
@@ -122,6 +136,7 @@ for plugin in vision.get("plugins", []):
     if plugin.get("name") == "steelball":
         plugin["config"].update({
             "model_path": model,
+            "model_type": model_type,
             "calibration_path": "",
             "image_to_capture_homography": homography,
         })

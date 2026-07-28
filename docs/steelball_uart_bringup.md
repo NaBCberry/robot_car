@@ -21,6 +21,17 @@
 边界框底边 `y2` 最大的一个；当 `y2` 相同时选择置信度更高的一个。该选择方式使画面中
 最靠下的钢球成为唯一目标。
 
+默认模型类型为 `seg`，但控制链路只使用边界框，分割模型会关闭掩膜生成以避免无用的后处理。
+生成并转换出钢球检测模型后，可改用 `det`：
+
+```bash
+./scripts/run_steelball_uart.sh --camera /dev/video0 \
+  --model-type det --model-path /absolute/path/to/steelball_det_640x640_nv12.bin
+```
+
+`--model-path` 必须是与 `det` 检测头匹配的钢球模型，不能传入现有的 `seg` `.bin`。两种模型
+都会复用同一套相机、最低钢球选择、坐标解算和 UART 发送链路。
+
 识别框的底边中点 `(u, y2)` 经过临时单应矩阵得到相对于电磁铁捕获点的地面坐标：
 
 ```text
