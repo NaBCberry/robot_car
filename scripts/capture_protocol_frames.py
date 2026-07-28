@@ -10,7 +10,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
@@ -19,13 +19,52 @@ from robot_car.protocol.framing import FrameDecoder, encode_frame
 from robot_car.protocol.messages import (HEARTBEAT_STRUCT, MessageType, ProtocolMessage,
                                          unpack_ack, unpack_json, unpack_motion)
 
+try:
+    import serial
+    import serial.tools.list_ports
+except ImportError as error:
+    raise SystemExit("缺少 pyserial；请运行: py -m pip install pyserial") from error
+
+
+def list_serial_ports() -> list[serial.tools.list_ports.ListPortInfo]:
+    """枚举当前系统上可用的串口列表。"""
+    ports = sorted(serial.tools.list_ports.comports(), key=lambda p: p.device)
+    return ports
+
+
+def _choose_port_interactively() -> str:
+    """交互式让用户选择一个串口，返回设备路径。"""
+    ports = list_serial_ports()
+    if not ports:
+        raise SystemExit("未检测到任何可用串口，请检查硬件连接后重试。")
+    print("检测到以下可用串口：")
+    for idx, port in enumerate(ports, 1):
+        desc = f" — {port.description}" if port.description else ""
+        hwid = f" (hwid: {port.hwid})" if port.hwid else ""
+        print(f"  [{idx}] {port.device}{desc}{hwid}")
+    if len(ports) == 1:
+        print(f"仅发现一个串口，自动选择 {ports[0].device}")
+        return ports[0].device
+    print(f"  [0] 退出")
+    while True:
+        try:
+            choice = input("请选择串口序号: ").strip()
+            idx = int(choice)
+            if idx == 0:
+                raise SystemExit("用户取消选择。")
+            if 1 <= idx <= len(ports):
+                return ports[idx - 1].device
+        except ValueError:
+            pass
+        print(f"请输入 0-{len(ports)} 之间的数字。")
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="只读抓取并解码 RDK 小车 v2 UART 协议帧，不发送任何串口字节。",
     )
-    parser.add_argument("--port", "--device", dest="port", required=True,
-                        help="本地串口，例如 Windows 的 COM3")
+    parser.add_argument("--port", "--device", dest="port", default=None,
+                        help="本地串口，例如 Linux 的 /dev/ttyUSB0 或 Windows 的 COM3；不指定则自动探测并交互选择")
     parser.add_argument("--baudrate", type=int, default=115200, help="波特率，默认 115200")
     parser.add_argument("--count", type=int, default=0,
                         help="解出 N 帧后退出；0 表示持续抓包，默认 0")
@@ -71,10 +110,9 @@ def main() -> int:
     if args.timeout < 0:
         raise SystemExit("--timeout 必须是非负秒数")
 
-    try:
-        import serial
-    except ImportError as error:
-        raise SystemExit("缺少 pyserial；请运行: py -m pip install pyserial") from error
+    # 未指定串口时自动探测并交互选择
+    if args.port is None:
+        args.port = _choose_port_interactively()
 
     running = True
 
