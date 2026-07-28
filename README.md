@@ -9,8 +9,8 @@ camera -> visiond -> VisionEvent/Unix Socket -> vehicled -> protocol v1 -> MSPM0
 ```
 
 `visiond` 是唯一摄像头所有者；视觉插件只能处理它提供的同一帧。
-`vehicled` 是唯一 MSPM0 通信出口，只接受标准化事件并发送模式、速度、
-转向、限速和有效期，不发送左右电机 PWM。运行数据全部位于
+`vehicled` 是唯一 MSPM0 通信出口，只接受标准化事件并发送模式、有效期和可选的
+极坐标目标，不发送左右电机 PWM、速度、转向或限速。运行数据全部位于
 `/userdata/robot-car`，不会写进 Git 项目。
 
 ## 仓库目录与文件职责
@@ -24,12 +24,12 @@ robot_car/
 │   └── __init__.py                    # 仓库根目录运行时的 src-layout 导入 shim
 ├── docs/
 │   ├── vision_to_motion_flow.md       # OCR/通用视觉事件到 MSPM0 运动目标的流程图和时序图
-│   └── steelball_capture_control.md   # 钢球双控制链路、协议分层、标定和安全语义
+│   └── steelball_capture_control.md   # 钢球单一语义运动链路、协议分层、标定和安全语义
 ├── config/                            # 所有可部署参数，硬件路径不写死在代码中
 │   ├── base.yaml                      # 运行数据根目录、日志级别、UDS 和调试 Web 配置
 │   ├── camera.yaml                    # 摄像头启停、设备、分辨率、帧率和像素格式
 │   ├── vision.yaml                    # 视觉插件列表、频率、优先级、BPU 和确认策略
-│   ├── vehicle.yaml                   # 状态机、车控总开关、速度、心跳和超时参数
+│   ├── vehicle.yaml                   # 状态机、车控总开关、心跳和超时参数
 │   └── transport.yaml                 # Fake/UART/CAN 类型、端口、波特率和 CAN ID
 ├── deploy/
 │   └── systemd/                       # 仅供人工部署的 systemd 模板，不自动安装
@@ -44,7 +44,6 @@ robot_car/
 │   └── robot_car/                     # 应用主 Python 包
 │       ├── __init__.py                # 包版本和包级说明
 │       ├── config.py                  # YAML 合并、关键参数校验和运行目录创建
-│       ├── protocol_sender.py          # UART 单帧协议测试工具；默认仅打印编码结果
 │       ├── visiond.py                 # 单摄像头所有者、插件调度、事件发布和调试 API
 │       ├── vehicled.py                # 视觉订阅、状态机、心跳和 MSPM0 唯一通信出口
 │       ├── camera/                    # 摄像头采集层
@@ -65,7 +64,7 @@ robot_car/
 │       │   └── placeholders.py        # QR、颜色、车道线、分割和姿态插件占位实现
 │       ├── decision/                  # 只依赖标准视觉事件的高层决策层
 │       │   ├── __init__.py            # decision 子包声明
-│       │   ├── motion_target.py       # 模式、速度、转向、限速和有效期目标结构
+│       │   ├── motion_target.py       # 模式、有效期和可选极坐标目标结构
 │       │   ├── capture_target.py      # 钢球的相对角度/距离目标及目标失效安全值
 │       │   ├── control_arbiter.py     # 在普通运动与 MCU 捕获伺服链路间互斥仲裁
 │       │   ├── rules.py               # STOP/SLOW_DOWN/OCR 等事件到行为的规则映射
@@ -78,7 +77,7 @@ robot_car/
 │       │   ├── __init__.py            # 导出协议编解码公共 API
 │       │   ├── messages.py            # 消息枚举及 motion、ACK、JSON payload 编解码
 │       │   ├── framing.py             # SLIP 风格分帧、CRC-16 和增量解码器
-│       │   └── protocol_v1.md         # 固件与 Python 端共同遵循的字节级协议文档
+│       │   └── protocol_v2.md         # 固件与 Python 端共同遵循的字节级协议文档
 │       ├── vehicle_link/              # 真实硬件与 FakeTransport 的统一通信层
 │       │   ├── __init__.py            # vehicle_link 子包声明
 │       │   ├── transport_base.py      # open/send/receive/close 抽象传输接口
@@ -126,7 +125,7 @@ robot_car/
 
 - `camera.enabled: false` 且设备名为空，不会默认打开摄像头。
 - `transport.enabled: false`，UART 设备与 CAN 通道/ID 均为空。
-- `vehicle.control_enabled: false`，速度和限速均为零。
+- `vehicle.control_enabled: false`，网关强制发送禁用运动模式。
 - `vehicle.capture.enabled: false`；即使启用钢球插件，也不会下发有效捕获目标。
 - `vehicle.capture.feedback.enabled: false`；未接入霍尔/电流/开关/视觉反馈时，只能
   上报 `CAPTURE_ATTEMPTED`，绝不把电磁铁动作描述为捕获成功。
@@ -160,33 +159,25 @@ python3 -m robot_car.visiond --config-dir config --simulate
 - `GET http://127.0.0.1:8090/api/metrics`
 
 网页接口仅用于观测，车控不解析 MJPEG，也不轮询 HTTP。运行脚本为
-`scripts/run_vehicled.sh`、`scripts/run_visiond.sh` 和
-`scripts/send_protocol_frame.sh`。
+`scripts/run_vehicled.sh` 和 `scripts/run_visiond.sh`。
 
 ## UART 协议单帧测试
 
-`scripts/send_protocol_frame.sh` 用于 MSPM0 协议联调。默认只输出 payload 和
-SLIP/CRC 编码后的帧，不会打开串口。`--send` 必须与
-`--i-understand-real-hardware`、明确的 `--device` 同时给出才会真实发送。
+`scripts/send_protocol_frame.sh` 默认从 `config/transport.yaml` 读取 UART 设备和波特率，
+只打印 v2 帧，不会打开串口。加入 `--send` 才会实际写入 UART；控制类消息还必须显式
+加入 `--unsafe-allow-control`。
 
-发送自定义 `CMD_EVENT` JSON：
-
-```bash
-scripts/send_protocol_frame.sh --event-type DIAGNOSTIC --event-payload-json '{"request":"status"}'
-scripts/send_protocol_frame.sh --device /dev/ttySx --event-type DIAGNOSTIC \
-  --event-payload-json '{"request":"status"}' --send --i-understand-real-hardware
-```
-
-发送任意已有消息类型的原始 payload 时，使用十六进制字节并自行确保字段符合
-`protocol_v1.md`：
+例如，以下命令发送有效且允许捕获的 `CAPTURE_TARGET_POLAR`：目标 ID 为 `1`，方位角
+`+32` 度、距离 `32 cm`、有效期 `200 ms`。
 
 ```bash
-scripts/send_protocol_frame.sh --message-type 0x02 --payload-hex 7b7d
+scripts/send_protocol_frame.sh --message-type 0x01 \
+  --payload-hex '04 07 00 C8 00 01 00 00 7D 00 00 00 01 40 03 E8 00 00' \
+  --unsafe-allow-control --send
 ```
 
-脚本不会猜测板上 UART 设备。先通过设备树、板卡引脚图和接线确认连接到 MSPM0
-的 RX/TX 对应设备，再填写 `--device`；当前默认配置的 `transport.uart.device`
-为空。
+省略 `--send` 可先核对逻辑分析仪应看到的字节。字段定义见
+`src/robot_car/protocol/protocol_v2.md`。
 
 运行测试：
 
@@ -233,7 +224,7 @@ YOLO adapter 复用现有 `YOLO26Detect.predict(frame)`；OCR adapter 复用现�
 
 ## UART/CAN 联调
 
-协议见 `src/robot_car/protocol/protocol_v1.md`。先保持车轮悬空、MSPM0
+协议见 `src/robot_car/protocol/protocol_v2.md`。先保持车轮悬空、MSPM0
 硬件急停有效，并按以下顺序联调：
 
 1. MSPM0 实现 SLIP 分帧、CRC-16/CCITT、长度/版本检查和序列统计。

@@ -1,0 +1,102 @@
+# RDK-MSPM0 协议 v2
+
+本文定义 RDK X5 与 MSPM0 之间的字节级通信协议。所有多字节整数均使用大端序。
+v2 与 v1 **不兼容**：两端必须同时升级；收到版本号为 `1` 的帧必须拒绝，不能按
+v2 重新解释。v2 不再存在 `CMD_CAPTURE_TARGET`，所有车辆运动请求统一使用
+`CMD_MOTION (0x01)`。
+
+UART 使用类 SLIP 分帧：`0x7E` 同时作为一帧的开始和结束标记。帧内容中的
+`0x7E` 和 `0x7D` 分别编码为 `0x7D 0x5E` 和 `0x7D 0x5D`。
+
+## 通用帧格式
+
+| 字段 | 大小 | 说明 |
+|---|---:|---|
+| `protocol_version` | u8 | 固定为 `2` |
+| `message_type` | u8 | 消息类型，见下表 |
+| `sequence` | u16 | 发送方序列号，按 `65536` 取模递增 |
+| `payload_length` | u16 | payload 长度，范围 `0`-`4096` 字节 |
+| `payload` | 可变 | 与消息类型对应的内容 |
+| `crc` | u16 | 帧头与 payload 的 CRC-16/CCITT-FALSE；初值 `0xFFFF`，多项式 `0x1021` |
+
+接收端必须拒绝 CRC、版本、长度或消息类型不合法的帧。需要确认的命令通过
+`ACK` 中携带的原命令序列号匹配。
+
+## 消息类型
+
+| 值 | 名称 | payload |
+|---:|---|---|
+| `0x01` | `CMD_MOTION` | 下文定义的模式化运动意图 |
+| `0x02` | `CMD_EVENT` | 包含 `event_type`、`payload`、`valid_for_ms` 的 UTF-8 JSON 对象 |
+| `0x03` | `HEARTBEAT` | `sender_monotonic_ms:u32, valid_for_ms:u16` |
+| `0x10` | `TELEMETRY` | UTF-8 JSON 对象 |
+| `0x11` | `ACK` | `acknowledged_sequence:u16, status:u8`；`status=0` 表示接受 |
+| `0x12` | `FAULT` | 包含 `code`、`severity`、`detail` 的 UTF-8 JSON 对象 |
+
+`CMD_EVENT` 可用于低频业务事件，但不是车轮、PWM 或极坐标目标的承载方式。
+
+## `CMD_MOTION`
+
+`CMD_MOTION` 表达 MSPM0 应执行的**高层运动模式**，不包含左右轮转速、转向角、
+速度、限速或 PWM。MSPM0 负责每种模式的局部控制器、速度策略、编码器/IMU/灰度
+闭环、急停和最终电机输出。
+
+所有模式都有固定的公共头：
+
+| 字段 | 大小 | 说明 |
+|---|---:|---|
+| `mode` | u8 | 运动模式 |
+| `flags` | u8 | 标志位，见下表 |
+| `valid_for_ms` | u16 | 本命令最多可被使用的时长，必须大于零 |
+
+`flags` 定义如下：bit 0 是 `enabled`，为 `0` 时 MSPM0 必须安全停车；bit 1 是
+`target_valid`，仅极坐标捕获模式可用；bit 2 是 `capture_armed`，仅极坐标捕获模式
+可用；bits 3-7 必须为零。非极坐标模式不能设置 bit 1 或 bit 2。
+
+| `mode` | 名称 | 模式专属 payload | MSPM0 职责 |
+|---:|---|---|---|
+| `0` | `DISABLED` | 无，payload 共 4 字节 | 停止运动并禁用运动输出 |
+| `1` | `IDLE` | 无，payload 共 4 字节 | 安全静止，保持可用 |
+| `2` | `LINE_FOLLOW` | 无，payload 共 4 字节 | 使用 MSPM0 本地巡线和速度策略 |
+| `3` | `VISION_ASSIST` | 无，payload 共 4 字节 | 使用 MSPM0 预置的视觉辅助策略 |
+| `4` | `CAPTURE_TARGET_POLAR` | 下表字段，payload 共 18 字节 | 对齐、接近与捕获钢球 |
+
+因此 `LINE_FOLLOW` 的 payload 固定为四字节，绝不会包含速度、转向或限速字段。
+
+### `CAPTURE_TARGET_POLAR` 专属字段
+
+公共头后按下表追加 14 字节：
+
+| 字段 | 大小 | 说明 |
+|---|---:|---|
+| `track_id` | u16 | RDK 目标跟踪器给出的目标标识 |
+| `bearing_mdeg` | i32 | 钢球相对电磁铁捕获点前向轴的方位角，单位毫度 |
+| `range_mm` | i32 | 钢球到电磁铁捕获点的地面平面距离，单位毫米 |
+| `confidence_permille` | u16 | 视觉置信度，范围 `0`-`1000` |
+| `measurement_age_ms` | u16 | 从测量到发送的时延，单位毫秒 |
+
+零度是电磁铁捕获点的车体前向轴；`bearing_mdeg` 的正负方向必须与地面标定和
+MSPM0 固件一致。`range_mm` 的参考点是电磁铁捕获点，不是摄像头或车体几何中心。
+
+当 `target_valid=1` 时，上表字段必须是有效测量，且可按 `capture_armed` 决定是否
+允许执行磁铁动作。当目标丢失、过期、置信度不足、捕获关闭或 RDK 车控总开关关闭时，
+RDK 发送同一模式且 `enabled=0,target_valid=0` 的 18 字节安全帧，所有专属字段为零。
+MSPM0 必须停止捕获运动。`capture_armed` 仅表示允许尝试捕获，不表示已经捕获成功。
+
+MSPM0 必须拒绝未知模式、保留标志位、模式与 payload 长度不匹配、无效目标却携带
+非零专属字段、过期测量或超量程目标。最新有效命令或心跳任一超时后，MSPM0 必须
+安全停车；硬件急停优先级始终最高。
+
+## 反馈与遥测
+
+建议 `TELEMETRY` 包含 `timestamp_ms`、`motion_sequence`、`speed_left_mm_s`、
+`speed_right_mm_s`、`line_error`、`imu_yaw_mdeg`、`battery_mv`、`estop`、`faults`
+和 `capture_state`。捕获反馈关闭时，MSPM0 只能上报 `CAPTURE_ATTEMPTED`，不能把
+已发出磁铁动作误报为 `CAPTURED`。
+
+## CAN 映射
+
+CAN 沿用相同编码帧和字节序。对 Classical CAN，每段数据的第一个字节为分段控制字，
+其后最多承载 7 个协议帧字节：bit 7 标识首段，bit 6 标识尾段，bits 5-0 是从零开始的
+分段索引。分段缺失或乱序时，接收端必须丢弃未完成帧。CAN ID、通道和波特率属于部署
+配置，启用前必须与 MSPM0 固件确认一致。
