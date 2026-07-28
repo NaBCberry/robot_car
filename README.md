@@ -41,6 +41,8 @@ robot_car/
 │   ├── diagnose_hardware.sh           # 只读列举 Python、视频、串口和 CAN 候选资源
 │   ├── send_protocol_frame.sh          # 显式确认后向指定 UART 发送一帧协议测试数据
 │   ├── capture_protocol_frames.sh      # 本地 USB-UART 只读抓取并解码 v2 协议帧
+│   ├── capture_protocol_frames.py      # Windows/Linux 均可用的 pyserial 协议抓包器
+│   ├── capture_protocol_frames_windows.bat # Windows Python 启动包装
 │   ├── run_steelball_uart.sh           # 相机识别最下方钢球并向 UART 输出极坐标的联调入口
 │   ├── run_vehicled.sh                # 设置工作目录/PYTHONPATH 后启动 vehicled
 │   └── run_visiond.sh                 # 设置工作目录/PYTHONPATH 后启动 visiond
