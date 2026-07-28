@@ -93,6 +93,42 @@ class VehicleDaemonCaptureTests(unittest.TestCase):
         messages = [message for frame in transport.sent for message in decoder.feed(frame)]
         self.assertFalse(any(message.message_type == MessageType.HEARTBEAT for message in messages))
 
+    def test_output_only_capture_sends_coordinates_without_mspm0_telemetry(self):
+        now_ms = time.monotonic_ns() // 1_000_000
+        config = {
+            "runtime": {"vision_socket": "/tmp/not-used.sock"},
+            "vehicle": {
+                "control_enabled": True,
+                "initial_mode": "IDLE",
+                "default_valid_for_ms": 200,
+                "heartbeat_hz": 1000,
+                "vision_timeout_ms": 500,
+                "link_timeout_ms": 500,
+                "capture": {"enabled": True, "output_only": True,
+                            "target_timeout_ms": 200, "feedback": {"enabled": False}},
+            },
+        }
+        transport = FakeTransport()
+        daemon = VehicleDaemon(config, transport)
+        daemon.is_fake = False  # Model the no-reply UART/logic-analyzer test condition.
+        event = VisionEvent(now_ms, "steelball", "BALL_TARGET", 0.94, {
+            "track_id": 17, "bearing_mdeg": -12000, "range_mm": 680,
+        }, 8, 150, 1280, 720)
+        daemon.subscriber = OneEventSubscriber(daemon, event)
+
+        daemon.run()
+
+        decoder = FrameDecoder()
+        messages = [message for frame in transport.sent for message in decoder.feed(frame)]
+        polar = [unpack_motion(message.payload) for message in messages
+                 if message.message_type == MessageType.CMD_MOTION
+                 and unpack_motion(message.payload)["mode"] == MotionMode.CAPTURE_TARGET_POLAR]
+        self.assertEqual(len(polar), 1)
+        self.assertFalse(polar[0]["enabled"])
+        self.assertTrue(polar[0]["target_valid"])
+        self.assertEqual(polar[0]["bearing_mdeg"], -12000)
+        self.assertEqual(polar[0]["range_mm"], 680)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,6 @@
 # 最下方钢球 UART 生产联调
 
-本页给出真实相机、YOLO26Seg 钢球模型和 MSPM0 UART 的联调入口。它不修改
+本页给出真实相机、YOLO26 DET 钢球模型和 MSPM0 UART 的联调入口。它不修改
 `ultralytics_yolo26` 模型仓库，也不改写项目的配置文件。
 
 ## 默认输出模式
@@ -14,23 +14,22 @@
 脚本会检查相机与 `/dev/ttyS1` 均为字符设备，加载以下现有模型：
 
 ```text
-/userdata/rdkstudio/projects/ultralytics_yolo26/model/steelball_seg_bpu_bayese_640x640_nv12.bin
+/userdata/rdkstudio/projects/ultralytics_yolo26/model/steelball-yolo26n-det_bayese_640x640_nv12.bin
 ```
 
-它只启用 `steelball` 视觉插件，使用 YOLO26Seg 对每帧检测。若画面有多个钢球，选择
+它只启用 `steelball` 视觉插件，使用 YOLO26 DET 对每帧检测。若画面有多个钢球，选择
 边界框底边 `y2` 最大的一个；当 `y2` 相同时选择置信度更高的一个。该选择方式使画面中
 最靠下的钢球成为唯一目标。
 
-默认模型类型为 `seg`，但控制链路只使用边界框，分割模型会关闭掩膜生成以避免无用的后处理。
-生成并转换出钢球检测模型后，可改用 `det`：
+默认模型类型为 `det`。如需使用其他钢球检测模型，可通过参数覆盖：
 
 ```bash
 ./scripts/run_steelball_uart.sh --camera /dev/video0 \
-  --model-type det --model-path /absolute/path/to/steelball_det_640x640_nv12.bin
+  --model-path /absolute/path/to/steelball_det_640x640_nv12.bin
 ```
 
-`--model-path` 必须是与 `det` 检测头匹配的钢球模型，不能传入现有的 `seg` `.bin`。两种模型
-都会复用同一套相机、最低钢球选择、坐标解算和 UART 发送链路。
+`--model-path` 必须是与指定模型类型匹配的钢球模型。两种模型都会复用同一套相机、最低
+钢球选择、坐标解算和 UART 发送链路。
 
 识别框的底边中点 `(u, y2)` 经过临时单应矩阵得到相对于电磁铁捕获点的地面坐标：
 
@@ -44,7 +43,8 @@ range_mm = hypot(forward_mm, lateral_mm)
 随后 `vehicled` 将这些值编码为 v2 `CMD_MOTION/CAPTURE_TARGET_POLAR`，通过
 `/dev/ttyS1` 以 `115200` 波特率发送。默认配置强制消息的 `enabled=0`，但
 `target_valid=1`、方位角与距离仍会发送，因此逻辑分析仪和 MSPM0 可以验证完整数据链，
-却不得由该帧驱动车轮或电磁铁。
+却不得由该帧驱动车轮或电磁铁。输出模式不会等待 MSPM0 遥测，因此接收端仅连接逻辑
+分析仪时也能观察到目标帧；传入 `--allow-motion` 后仍必须接收到正常遥测，否则会安全停车。
 
 `Ctrl-C` 会停止两个守护进程；车辆通信进程退出时会再发送一个禁用目标。
 

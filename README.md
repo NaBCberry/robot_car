@@ -61,7 +61,7 @@ robot_car/
 │       │   ├── stabilizer.py          # 连续多帧确认及中断后重新计数
 │       │   ├── yolo_adapter.py        # 复用现有 YOLO26Detect，不打开摄像头
 │       │   ├── ocr_adapter.py         # 复用现有 PaddleOCR，不打开摄像头
-│       │   ├── steelball_adapter.py   # 复用 YOLO26Seg 检测钢球，并生成捕获目标事件
+│       │   ├── steelball_adapter.py   # 复用 YOLO26 Seg/DET 检测钢球，并生成捕获目标事件
 │       │   ├── steelball_geometry.py  # 图像到电磁铁捕获点相对坐标的单应性解算
 │       │   └── placeholders.py        # QR、颜色、车道线、分割和姿态插件占位实现
 │       ├── decision/                  # 只依赖标准视觉事件的高层决策层
@@ -216,15 +216,15 @@ YOLO adapter 复用现有 `YOLO26Detect.predict(frame)`；OCR adapter 复用现�
 `PaddleOCR.predict(frame)`。两者都延迟导入板端 BPU 运行库，初始化失败会被
 隔离并清晰记录，不会自行打开摄像头。
 
-钢球插件复用相邻 `ultralytics_yolo26/runtime/python/yolo26_seg.py` 的
-`YOLO26Seg` 和其中配置的模型文件，只使用 `visiond` 提供的 `CameraFrame`；
-它不导入或运行 `steelball_web.py`，因此不会额外打开摄像头。要生成供 MCU
+钢球插件根据 `model_type` 复用相邻 `ultralytics_yolo26/runtime/python` 中的
+`YOLO26Seg` 或 `YOLO26Detect` 和对应模型文件，只使用 `visiond` 提供的
+`CameraFrame`；它不导入或运行 `steelball_web.py`，因此不会额外打开摄像头。要生成供 MCU
 伺服使用的 `BALL_TARGET`，还必须填写并验证图像到电磁铁捕获点的标定矩阵。
 
 ## 最下方钢球 UART 联调
 
 已确认相机设备后，下面的命令会打开真实相机和 `/dev/ttyS1`，复用
-`ultralytics_yolo26` 的钢球分割模型，选取画面中边界框底边最低的钢球，并持续发送
+`ultralytics_yolo26` 的钢球 DET 模型，选取画面中边界框底边最低的钢球，并持续发送
 `CAPTURE_TARGET_POLAR`。默认是输出模式：帧中仍有角度和距离，`enabled=0`，MSPM0
 不得驱动电机。
 

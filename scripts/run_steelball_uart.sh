@@ -6,9 +6,8 @@ project_root=$(cd "$(dirname "$0")/.." && pwd)
 camera_device=/dev/video0
 uart_device=/dev/ttyS1
 baudrate=115200
-model_type=seg
-model_path=/userdata/rdkstudio/projects/ultralytics_yolo26/model/steelball_seg_bpu_bayese_640x640_nv12.bin
-model_path_explicit=0
+model_type=det
+model_path=/userdata/rdkstudio/projects/ultralytics_yolo26/model/steelball-yolo26n-det_bayese_640x640_nv12.bin
 allow_motion=0
 allow_temporary_calibration=0
 
@@ -26,8 +25,8 @@ v2 CAPTURE_TARGET_POLAR 的角度和距离。默认强制 enabled=0，MSPM0 必�
   --camera DEVICE                    摄像头，默认 /dev/video0
   --uart DEVICE                      UART，默认 /dev/ttyS1
   --baudrate RATE                    UART 波特率，默认 115200
-  --model-type seg|det               钢球模型类型，默认 seg
-  --model-path MODEL.bin             对应模型路径；det 模式必须明确提供
+  --model-type seg|det               钢球模型类型，默认 det
+  --model-path MODEL.bin             对应模型路径
   --allow-motion                     允许 MSPM0 根据目标驱动车辆
   --allow-temporary-calibration      确认目前使用的是临时标定，必须与 --allow-motion 同时给出
   -h, --help                         显示本帮助
@@ -40,7 +39,7 @@ while (($#)); do
         --uart) uart_device=$2; shift 2 ;;
         --baudrate) baudrate=$2; shift 2 ;;
         --model-type) model_type=$2; shift 2 ;;
-        --model-path) model_path=$2; model_path_explicit=1; shift 2 ;;
+        --model-path) model_path=$2; shift 2 ;;
         --allow-motion) allow_motion=1; shift ;;
         --allow-temporary-calibration) allow_temporary_calibration=1; shift ;;
         -h|--help) usage; exit 0 ;;
@@ -58,10 +57,6 @@ if ((allow_motion && !allow_temporary_calibration)); then
 fi
 if [[ "$model_type" != "seg" && "$model_type" != "det" ]]; then
     echo "--model-type 只能是 seg 或 det" >&2
-    exit 2
-fi
-if [[ "$model_type" == "det" && "$model_path_explicit" != 1 ]]; then
-    echo "det 模式必须用 --model-path 指定与钢球类别匹配的检测 .bin" >&2
     exit 2
 fi
 if [[ ! -c "$camera_device" ]]; then

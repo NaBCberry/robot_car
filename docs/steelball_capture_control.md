@@ -29,7 +29,7 @@ RDK 永不发送左右轮速度、转向角或 PWM；每个发送周期只发送
 flowchart LR
     A[钢球实景] --> B[camera/capture.py<br/>CameraFrame]
     B --> C[perception/scheduler.py]
-    C --> D[perception/steelball_adapter.py<br/>YOLO26Seg.predict]
+    C --> D[perception/steelball_adapter.py<br/>YOLO26 DET/Seg.predict]
     D --> E[perception/steelball_geometry.py<br/>像素点转电磁铁坐标]
     E --> F[perception/events.py<br/>BALL_TARGET]
     F --> G[ipc/schemas.py + ipc/vision_socket.py<br/>UDS JSON-lines]
@@ -46,8 +46,8 @@ flowchart LR
 
 1. `camera/capture.py` 是唯一摄像头拥有者，为图像建立带单调时间戳的 `CameraFrame`。
 2. `scheduler.py` 调用 `steelball_adapter.py`，后者只复用
-   `/userdata/rdkstudio/projects/ultralytics_yolo26/runtime/python/yolo26_seg.py` 的
-   `YOLO26Seg`，不启动其 Web 程序，也不重复打开摄像头。
+   `ultralytics_yolo26/runtime/python/yolo26_det.py` 或 `yolo26_seg.py` 的对应运行时，
+   不启动其 Web 程序，也不重复打开摄像头。
 3. adapter 选取目标类别中边界框底边最低的实例；置信度仅在底边相同时用于决胜。
    `steelball_geometry.py` 使用 3x3 单应矩阵把底边中点投影到相对电磁铁的地面坐标，
    并计算方位角和距离。未标定时只产生
