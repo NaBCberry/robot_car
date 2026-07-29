@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict
 from .ocr_adapter import OcrAdapter
 from .placeholders import PlaceholderPlugin
 from .plugin import VisionPlugin
+from .roller_balance_adapter import RollerBalanceAdapter
 from .steelball_adapter import SteelballAdapter
 from .yolo_adapter import YoloAdapter
 
@@ -14,6 +15,7 @@ _REGISTRY: Dict[str, Factory] = {
     "yolo_detector": YoloAdapter,
     "paddle_ocr": OcrAdapter,
     "steelball_segmentation": SteelballAdapter,
+    "roller_balance": RollerBalanceAdapter,
     "qr_code": PlaceholderPlugin,
     "color_marker": PlaceholderPlugin,
     "lane_vision": PlaceholderPlugin,

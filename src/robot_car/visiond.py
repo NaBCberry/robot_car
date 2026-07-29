@@ -36,6 +36,7 @@ class VisionDaemon:
         self.camera = CameraCapture(config["camera"])
         calibration = config["camera"].get("calibration", {}).get(
             "image_to_capture_homography", [])
+        roller_calibration = config["camera"].get("calibration", {}).get("roller_balance", {})
         plugin_configs = []
         for item in config["vision"].get("plugins", []):
             plugin_config = copy.deepcopy(item)
@@ -43,6 +44,8 @@ class VisionDaemon:
                 options = plugin_config.setdefault("config", {})
                 options["image_to_capture_homography"] = calibration
                 options["calibration_path"] = ""
+            if plugin_config.get("type") == "roller_balance" and roller_calibration:
+                plugin_config.setdefault("config", {}).update(copy.deepcopy(roller_calibration))
             plugin_configs.append(plugin_config)
         plugins = [create_plugin(item) for item in plugin_configs]
         default_ttl = int(config["vision"].get("default_ttl_ms", 150))
@@ -131,7 +134,11 @@ class VisionDaemon:
                 "ipc_clients": self.publisher.client_count, "plugins": self.scheduler.health()}
 
     def results(self) -> Dict[str, Any]:
-        return {"events": self.latest_events, "timestamp_monotonic_ms": monotonic_ms()}
+        now = monotonic_ms()
+        events = [event for event in self.latest_events
+                  if now - int(event.get("timestamp_monotonic_ms", 0))
+                  <= int(event.get("ttl_ms", 0))]
+        return {"events": events, "timestamp_monotonic_ms": now}
 
     def preview_frame(self) -> Optional[bytes]:
         with self._preview_lock:

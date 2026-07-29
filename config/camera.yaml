@@ -23,3 +23,10 @@ camera:
       - 0.0
       - 0.0
       - 1.0
+    # Fill these from the top-view roller-balance camera calibration before enabling
+    # the roller_balance plugin. x grows from the image center_x_px along axis_direction.
+    roller_balance:
+      roi_xyxy: []
+      center_x_px: 0
+      mm_per_pixel: 0
+      axis_direction: 1
