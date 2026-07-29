@@ -63,7 +63,7 @@ UART 帧以固定两字节帧头 `0xA5 0x5A` 开始，**没有帧尾，也不使
 | `2` | `LINE_FOLLOW` | 无，payload 共 4 字节 | 使用 MSPM0 本地巡线和速度策略 |
 | `3` | `VISION_ASSIST` | 无，payload 共 4 字节 | 使用 MSPM0 预置的视觉辅助策略 |
 | `4` | `CAPTURE_TARGET_POLAR` | 下表字段，payload 共 18 字节 | 对齐、接近与捕获钢球 |
-| `5` | `BALANCE_ROLLER` | 下表字段，payload 共 20 字节 | 本地摆杆平衡和本地循迹 |
+| `5` | `BALANCE_ROLLER` | 下表字段，payload 共 6 字节 | 本地摆杆平衡和本地循迹 |
 
 因此 `LINE_FOLLOW` 的 payload 固定为四字节，绝不会包含速度、转向或限速字段。
 
@@ -93,23 +93,16 @@ MSPM0 必须拒绝未知模式、保留标志位、模式与 payload 长度不�
 
 ### `BALANCE_ROLLER` 专属字段
 
-公共头后按下表追加 16 字节。相机固定在凹槽正上方，管槽中心 O 为零点；位置、速度和
-加速度均沿管槽轴线，正方向由 RDK 标定配置与 MSPM0 固件共同约定。
+公共头后只追加 2 字节。相机固定在凹槽正上方，管槽中心 O 为零点；正方向由 RDK 标定
+配置与 MSPM0 固件共同约定。
 
 | 字段 | 大小 | 说明 |
 |---|---:|---|
-| `track_id` | u16 | 钢球跟踪标识 |
-| `position_mm` | i16 | 钢球相对 O 点的位置，单位 mm |
-| `target_mm` | i16 | 目标位置，单位 mm，中心平衡时为 `0` |
-| `error_mm` | i16 | `position_mm - target_mm`，单位 mm |
-| `velocity_mm_s` | i16 | 滤波后的钢球速度，单位 mm/s |
-| `acceleration_mm_s2` | i16 | 滤波后的钢球加速度，单位 mm/s² |
-| `confidence_permille` | u16 | 视觉置信度，范围 `0`-`1000` |
-| `measurement_age_ms` | u16 | 从图像测量到发送的时延，单位 ms |
+| `error_mm` | i16 | 钢球相对 O 点的有符号距离偏差，单位 mm |
 
-当 `balance_valid=1` 时，`error_mm` 必须等于 `position_mm-target_mm`。当钢球丢失、
-状态过期、平衡开关关闭或 RDK 车控总开关关闭时，RDK 发送同一模式且
-`enabled=0,balance_valid=0` 的 20 字节安全帧，所有专属字段为零。MSPM0 不得对旧状态
+当 `balance_valid=1` 时，MSPM0 只使用 `error_mm` 作为摆杆控制输入。速度和加速度不由
+RDK 计算或发送。当钢球丢失、状态过期、平衡开关关闭或 RDK 车控总开关关闭时，RDK
+发送同一模式且 `enabled=0,balance_valid=0` 的 6 字节安全帧，专属字段为零。MSPM0 不得对旧状态
 积分；应执行本地安全中位或低增益保持策略。`BALANCE_ROLLER` 不携带车轮 PWM，MSPM0
 仍独立执行红外循迹、急停和摆杆高频 PID。
 

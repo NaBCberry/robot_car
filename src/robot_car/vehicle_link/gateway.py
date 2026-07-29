@@ -92,12 +92,7 @@ class VehicleGateway:
                 output_only = bool(balance_config.get("output_only", False))
                 payload = pack_motion(
                     safe_target.mode, safe_target.enabled and not output_only,
-                    safe_target.valid_for_ms, balance_track_id=balance.track_id,
-                    position_mm=balance.position_mm, target_mm=balance.target_mm,
-                    error_mm=balance.error_mm, velocity_mm_s=balance.velocity_mm_s,
-                    acceleration_mm_s2=balance.acceleration_mm_s2,
-                    balance_confidence_permille=balance.confidence_permille,
-                    balance_measurement_age_ms=balance.measurement_age_ms,
+                    safe_target.valid_for_ms, balance_error_mm=balance.error_mm,
                     balance_valid=balance.valid)
             else:
                 payload = pack_motion(safe_target.mode, False, safe_target.valid_for_ms)

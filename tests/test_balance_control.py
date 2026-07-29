@@ -13,8 +13,7 @@ BALANCE_CONFIG = {"enabled": True, "state_timeout_ms": 120}
 
 def balance_event(timestamp: int = 1000) -> VisionEvent:
     return VisionEvent(timestamp, "roller_balance", "BALL_BALANCE_STATE", 0.91, {
-        "track_id": 1, "position_mm": 25, "target_mm": 0, "error_mm": 25,
-        "velocity_mm_s": -30, "acceleration_mm_s2": 40,
+        "error_mm": 25,
     }, 4, 120, 1280, 720)
 
 
@@ -23,14 +22,13 @@ class BalanceControlTests(unittest.TestCase):
         state = BalanceState.from_event(balance_event(), 1020, 120)
         self.assertTrue(state.valid)
         self.assertEqual(state.error_mm, 25)
-        self.assertEqual(state.velocity_mm_s, -30)
 
     def test_arbiter_selects_only_fresh_balance_state(self):
         arbiter = ControlArbiter({"balance": BALANCE_CONFIG})
         arbiter.handle_event(balance_event(), 1010)
         motion = arbiter.select(1020, MotionTarget(MotionMode.BALANCE_ROLLER, True, 120))
         self.assertTrue(motion.enabled)
-        self.assertEqual(motion.balance_state.position_mm, 25)
+        self.assertEqual(motion.balance_state.error_mm, 25)
         expired = arbiter.select(1140, MotionTarget(MotionMode.BALANCE_ROLLER, True, 120))
         self.assertFalse(expired.enabled)
         self.assertIsNone(expired.balance_state)
