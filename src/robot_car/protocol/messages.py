@@ -29,6 +29,7 @@ class MotionMode(IntEnum):
     LINE_FOLLOW = 2
     VISION_ASSIST = 3
     CAPTURE_TARGET_POLAR = 4
+    BALANCE_ROLLER = 5
 
 
 @dataclass(frozen=True)
@@ -48,12 +49,17 @@ MOTION_COMMON_STRUCT = struct.Struct(">BBH")
 # track_id:u16, bearing_mdeg:i32, range_mm:i32, confidence_permille:u16,
 # measurement_age_ms:u16
 MOTION_POLAR_TARGET_STRUCT = struct.Struct(">HiiHH")
+# track_id:u16, position_mm:i16, target_mm:i16, error_mm:i16, velocity_mm_s:i16,
+# acceleration_mm_s2:i16, confidence_permille:u16, measurement_age_ms:u16
+MOTION_BALANCE_STATE_STRUCT = struct.Struct(">HhhhhhHH")
 ACK_STRUCT = struct.Struct(">HB")
 HEARTBEAT_STRUCT = struct.Struct(">IH")
 MOTION_FLAG_ENABLED = 0x01
 MOTION_FLAG_TARGET_VALID = 0x02
 MOTION_FLAG_CAPTURE_ARMED = 0x04
-MOTION_FLAG_MASK = MOTION_FLAG_ENABLED | MOTION_FLAG_TARGET_VALID | MOTION_FLAG_CAPTURE_ARMED
+MOTION_FLAG_BALANCE_VALID = 0x08
+MOTION_FLAG_MASK = (MOTION_FLAG_ENABLED | MOTION_FLAG_TARGET_VALID | MOTION_FLAG_CAPTURE_ARMED
+                    | MOTION_FLAG_BALANCE_VALID)
 
 
 def _motion_mode(value: int | MotionMode) -> MotionMode:
@@ -68,38 +74,74 @@ def _validate_uint(value: int, label: str, maximum: int, *, minimum: int = 0) ->
         raise ValueError(f"{label} must fit {minimum}..{maximum}")
 
 
+def _validate_int16(value: int, label: str) -> None:
+    if not -0x8000 <= value <= 0x7FFF:
+        raise ValueError(f"{label} must fit int16")
+
+
 def pack_motion(mode: int | MotionMode, enabled: bool, valid_for_ms: int, *,
                 track_id: int = 0, bearing_mdeg: int = 0, range_mm: int = 0,
                 confidence_permille: int = 0, measurement_age_ms: int = 0,
-                target_valid: bool = False, capture_armed: bool = False) -> bytes:
+                target_valid: bool = False, capture_armed: bool = False,
+                balance_track_id: int = 0, position_mm: int = 0, target_mm: int = 0,
+                error_mm: int = 0, velocity_mm_s: int = 0, acceleration_mm_s2: int = 0,
+                balance_confidence_permille: int = 0, balance_measurement_age_ms: int = 0,
+                balance_valid: bool = False) -> bytes:
     """Pack one v2 semantic motion intent without exposing wheel control."""
     parsed_mode = _motion_mode(mode)
     _validate_uint(valid_for_ms, "valid_for_ms", 0xFFFF, minimum=1)
     flags = MOTION_FLAG_ENABLED if enabled else 0
 
-    if parsed_mode != MotionMode.CAPTURE_TARGET_POLAR:
-        if any((track_id, bearing_mdeg, range_mm, confidence_permille, measurement_age_ms,
-                target_valid, capture_armed)):
-            raise ValueError("only CAPTURE_TARGET_POLAR may contain a target payload")
+    polar_fields = (track_id, bearing_mdeg, range_mm, confidence_permille, measurement_age_ms,
+                    target_valid, capture_armed)
+    balance_fields = (balance_track_id, position_mm, target_mm, error_mm, velocity_mm_s,
+                      acceleration_mm_s2, balance_confidence_permille,
+                      balance_measurement_age_ms, balance_valid)
+    if parsed_mode not in {MotionMode.CAPTURE_TARGET_POLAR, MotionMode.BALANCE_ROLLER}:
+        if any(polar_fields) or any(balance_fields):
+            raise ValueError("only target motion modes may contain a mode payload")
         return MOTION_COMMON_STRUCT.pack(parsed_mode, flags, valid_for_ms)
 
-    if target_valid:
-        _validate_uint(track_id, "track_id", 0xFFFF)
-        _validate_uint(range_mm, "range_mm", 0x7FFFFFFF)
-        _validate_uint(confidence_permille, "confidence_permille", 1000)
-        _validate_uint(measurement_age_ms, "measurement_age_ms", 0xFFFF)
-        if not -0x80000000 <= bearing_mdeg <= 0x7FFFFFFF:
-            raise ValueError("bearing_mdeg must fit int32")
-        flags |= MOTION_FLAG_TARGET_VALID
-        if capture_armed:
-            flags |= MOTION_FLAG_CAPTURE_ARMED
-    elif any((track_id, bearing_mdeg, range_mm, confidence_permille, measurement_age_ms,
-              capture_armed)):
-        raise ValueError("an invalid polar target must use zero fields and be disarmed")
+    if parsed_mode == MotionMode.CAPTURE_TARGET_POLAR:
+        if any(balance_fields):
+            raise ValueError("BALANCE_ROLLER fields cannot accompany a polar target")
+        if target_valid:
+            _validate_uint(track_id, "track_id", 0xFFFF)
+            _validate_uint(range_mm, "range_mm", 0x7FFFFFFF)
+            _validate_uint(confidence_permille, "confidence_permille", 1000)
+            _validate_uint(measurement_age_ms, "measurement_age_ms", 0xFFFF)
+            if not -0x80000000 <= bearing_mdeg <= 0x7FFFFFFF:
+                raise ValueError("bearing_mdeg must fit int32")
+            flags |= MOTION_FLAG_TARGET_VALID
+            if capture_armed:
+                flags |= MOTION_FLAG_CAPTURE_ARMED
+        elif any((track_id, bearing_mdeg, range_mm, confidence_permille, measurement_age_ms,
+                  capture_armed)):
+            raise ValueError("an invalid polar target must use zero fields and be disarmed")
+        return (MOTION_COMMON_STRUCT.pack(parsed_mode, flags, valid_for_ms)
+                + MOTION_POLAR_TARGET_STRUCT.pack(track_id, bearing_mdeg, range_mm,
+                                                  confidence_permille, measurement_age_ms))
 
+    if any(polar_fields):
+        raise ValueError("polar target fields cannot accompany BALANCE_ROLLER")
+    if balance_valid:
+        _validate_uint(balance_track_id, "balance_track_id", 0xFFFF)
+        for value, label in ((position_mm, "position_mm"), (target_mm, "target_mm"),
+                             (error_mm, "error_mm"), (velocity_mm_s, "velocity_mm_s"),
+                             (acceleration_mm_s2, "acceleration_mm_s2")):
+            _validate_int16(value, label)
+        _validate_uint(balance_confidence_permille, "balance_confidence_permille", 1000)
+        _validate_uint(balance_measurement_age_ms, "balance_measurement_age_ms", 0xFFFF)
+        if error_mm != position_mm - target_mm:
+            raise ValueError("balance error_mm must equal position_mm - target_mm")
+        flags |= MOTION_FLAG_BALANCE_VALID
+    elif any((balance_track_id, position_mm, target_mm, error_mm, velocity_mm_s,
+              acceleration_mm_s2, balance_confidence_permille, balance_measurement_age_ms)):
+        raise ValueError("an invalid balance state must use zero fields")
     return (MOTION_COMMON_STRUCT.pack(parsed_mode, flags, valid_for_ms)
-            + MOTION_POLAR_TARGET_STRUCT.pack(track_id, bearing_mdeg, range_mm,
-                                              confidence_permille, measurement_age_ms))
+            + MOTION_BALANCE_STATE_STRUCT.pack(
+                balance_track_id, position_mm, target_mm, error_mm, velocity_mm_s,
+                acceleration_mm_s2, balance_confidence_permille, balance_measurement_age_ms))
 
 
 def unpack_motion(payload: bytes) -> Dict[str, Any]:
@@ -118,31 +160,62 @@ def unpack_motion(payload: bytes) -> Dict[str, Any]:
         "flags": flags,
         "valid_for_ms": valid_for_ms,
     }
-    if mode != MotionMode.CAPTURE_TARGET_POLAR:
-        if flags & (MOTION_FLAG_TARGET_VALID | MOTION_FLAG_CAPTURE_ARMED):
-            raise ValueError("only CAPTURE_TARGET_POLAR may set target flags")
+    if mode not in {MotionMode.CAPTURE_TARGET_POLAR, MotionMode.BALANCE_ROLLER}:
+        if flags & (MOTION_FLAG_TARGET_VALID | MOTION_FLAG_CAPTURE_ARMED | MOTION_FLAG_BALANCE_VALID):
+            raise ValueError("only target motion modes may set target flags")
         if len(payload) != MOTION_COMMON_STRUCT.size:
             raise ValueError("CMD_MOTION mode has an unexpected mode payload")
         return base
 
-    expected_size = MOTION_COMMON_STRUCT.size + MOTION_POLAR_TARGET_STRUCT.size
+    if mode == MotionMode.CAPTURE_TARGET_POLAR:
+        if flags & MOTION_FLAG_BALANCE_VALID:
+            raise ValueError("BALANCE_ROLLER flag is invalid for a polar target")
+        expected_size = MOTION_COMMON_STRUCT.size + MOTION_POLAR_TARGET_STRUCT.size
+        if len(payload) != expected_size:
+            raise ValueError("CAPTURE_TARGET_POLAR has an invalid payload length")
+        track_id, bearing, range_mm, confidence, age_ms = MOTION_POLAR_TARGET_STRUCT.unpack(
+            payload[MOTION_COMMON_STRUCT.size:])
+        target_valid = bool(flags & MOTION_FLAG_TARGET_VALID)
+        capture_armed = bool(flags & MOTION_FLAG_CAPTURE_ARMED)
+        if confidence > 1000:
+            raise ValueError("CAPTURE_TARGET_POLAR confidence exceeds 1000")
+        if not target_valid and (track_id or bearing or range_mm or confidence or age_ms or capture_armed):
+            raise ValueError("invalid CAPTURE_TARGET_POLAR must use zero fields and be disarmed")
+        return {
+            **base,
+            "target_valid": target_valid,
+            "capture_armed": capture_armed,
+            "track_id": track_id,
+            "bearing_mdeg": bearing,
+            "range_mm": range_mm,
+            "confidence_permille": confidence,
+            "measurement_age_ms": age_ms,
+        }
+
+    if flags & (MOTION_FLAG_TARGET_VALID | MOTION_FLAG_CAPTURE_ARMED):
+        raise ValueError("polar target flags are invalid for BALANCE_ROLLER")
+    expected_size = MOTION_COMMON_STRUCT.size + MOTION_BALANCE_STATE_STRUCT.size
     if len(payload) != expected_size:
-        raise ValueError("CAPTURE_TARGET_POLAR has an invalid payload length")
-    track_id, bearing, range_mm, confidence, age_ms = MOTION_POLAR_TARGET_STRUCT.unpack(
-        payload[MOTION_COMMON_STRUCT.size:])
-    target_valid = bool(flags & MOTION_FLAG_TARGET_VALID)
-    capture_armed = bool(flags & MOTION_FLAG_CAPTURE_ARMED)
+        raise ValueError("BALANCE_ROLLER has an invalid payload length")
+    track_id, position, target, error, velocity, acceleration, confidence, age_ms = (
+        MOTION_BALANCE_STATE_STRUCT.unpack(payload[MOTION_COMMON_STRUCT.size:]))
+    balance_valid = bool(flags & MOTION_FLAG_BALANCE_VALID)
     if confidence > 1000:
-        raise ValueError("CAPTURE_TARGET_POLAR confidence exceeds 1000")
-    if not target_valid and (track_id or bearing or range_mm or confidence or age_ms or capture_armed):
-        raise ValueError("invalid CAPTURE_TARGET_POLAR must use zero fields and be disarmed")
+        raise ValueError("BALANCE_ROLLER confidence exceeds 1000")
+    if balance_valid and error != position - target:
+        raise ValueError("BALANCE_ROLLER error_mm does not match position and target")
+    if not balance_valid and any((track_id, position, target, error, velocity, acceleration,
+                                  confidence, age_ms)):
+        raise ValueError("invalid BALANCE_ROLLER must use zero fields")
     return {
         **base,
-        "target_valid": target_valid,
-        "capture_armed": capture_armed,
+        "balance_valid": balance_valid,
         "track_id": track_id,
-        "bearing_mdeg": bearing,
-        "range_mm": range_mm,
+        "position_mm": position,
+        "target_mm": target,
+        "error_mm": error,
+        "velocity_mm_s": velocity,
+        "acceleration_mm_s2": acceleration,
         "confidence_permille": confidence,
         "measurement_age_ms": age_ms,
     }

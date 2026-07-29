@@ -2,6 +2,7 @@ import time
 import unittest
 
 from robot_car.decision.capture_target import CaptureTarget
+from robot_car.decision.balance_state import BalanceState
 from robot_car.decision.motion_target import MotionTarget
 from robot_car.protocol.framing import (CRC, HEADER, MAGIC, FrameDecoder, ProtocolError,
                                         crc16_ccitt, decode_packet, encode_frame)
@@ -78,6 +79,28 @@ class ProtocolTests(unittest.TestCase):
             "measurement_age_ms": 35,
         })
 
+    def test_roller_balance_round_trip(self):
+        payload = pack_motion(
+            MotionMode.BALANCE_ROLLER, True, 120, balance_track_id=3,
+            position_mm=-35, target_mm=10, error_mm=-45, velocity_mm_s=72,
+            acceleration_mm_s2=-160, balance_confidence_permille=930,
+            balance_measurement_age_ms=28, balance_valid=True)
+        self.assertEqual(unpack_motion(payload), {
+            "mode": MotionMode.BALANCE_ROLLER,
+            "enabled": True,
+            "flags": 9,
+            "valid_for_ms": 120,
+            "balance_valid": True,
+            "track_id": 3,
+            "position_mm": -35,
+            "target_mm": 10,
+            "error_mm": -45,
+            "velocity_mm_s": 72,
+            "acceleration_mm_s2": -160,
+            "confidence_permille": 930,
+            "measurement_age_ms": 28,
+        })
+
     def test_motion_rejects_invalid_mode_fields(self):
         with self.assertRaises(ValueError):
             pack_motion(MotionMode.LINE_FOLLOW, True, 200, range_mm=1)
@@ -88,6 +111,9 @@ class ProtocolTests(unittest.TestCase):
             unpack_motion(bytes((MotionMode.LINE_FOLLOW, 0x80, 0, 200)))
         with self.assertRaises(ValueError):
             unpack_motion(bytes((MotionMode.CAPTURE_TARGET_POLAR, 0, 0, 200)))
+        with self.assertRaisesRegex(ValueError, "error_mm"):
+            pack_motion(MotionMode.BALANCE_ROLLER, True, 120, balance_track_id=1,
+                        position_mm=1, target_mm=0, error_mm=2, balance_valid=True)
 
     def test_sequence_and_ack_matching(self):
         transport = FakeTransport()
@@ -156,6 +182,43 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(decoded["mode"], MotionMode.CAPTURE_TARGET_POLAR)
         self.assertFalse(decoded["enabled"])
         self.assertFalse(decoded["target_valid"])
+        gateway.close()
+
+    def test_gateway_sends_valid_roller_balance_state(self):
+        transport = FakeTransport()
+        gateway = VehicleGateway(transport, {
+            "control_enabled": True,
+            "default_valid_for_ms": 120,
+            "balance": {"enabled": True},
+        })
+        gateway.open()
+        now_ms = time.monotonic_ns() // 1_000_000
+        state = BalanceState(now_ms, 1, 25, 0, 25, -40, 80, 950, 5, 120, True)
+        gateway.send_motion(MotionTarget(MotionMode.BALANCE_ROLLER, True, 120,
+                                         balance_state=state))
+        decoded = unpack_motion(FrameDecoder().feed(transport.sent[-1])[0].payload)
+        self.assertEqual(decoded["mode"], MotionMode.BALANCE_ROLLER)
+        self.assertTrue(decoded["balance_valid"])
+        self.assertEqual(decoded["position_mm"], 25)
+        self.assertEqual(decoded["acceleration_mm_s2"], 80)
+        gateway.close()
+
+    def test_balance_output_only_sends_state_with_global_control_disabled(self):
+        transport = FakeTransport()
+        gateway = VehicleGateway(transport, {
+            "control_enabled": False,
+            "default_valid_for_ms": 120,
+            "balance": {"enabled": True, "output_only": True},
+        })
+        gateway.open()
+        now_ms = time.monotonic_ns() // 1_000_000
+        state = BalanceState(now_ms, 1, 25, 0, 25, -40, 80, 950, 5, 120, True)
+        gateway.send_motion(MotionTarget(MotionMode.BALANCE_ROLLER, True, 120,
+                                         balance_state=state))
+        decoded = unpack_motion(FrameDecoder().feed(transport.sent[-1])[0].payload)
+        self.assertFalse(decoded["enabled"])
+        self.assertTrue(decoded["balance_valid"])
+        self.assertEqual(decoded["position_mm"], 25)
         gateway.close()
 
 

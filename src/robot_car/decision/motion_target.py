@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 from robot_car.protocol.messages import MotionMode
 
 from .capture_target import CaptureTarget
+from .balance_state import BalanceState
 
 
 @dataclass(frozen=True)
@@ -14,6 +15,7 @@ class MotionTarget:
     enabled: bool = False
     valid_for_ms: int = 200
     capture_target: Optional[CaptureTarget] = None
+    balance_state: Optional[BalanceState] = None
 
     def safe(self) -> "MotionTarget":
         return MotionTarget(mode=MotionMode.DISABLED, enabled=False, valid_for_ms=self.valid_for_ms)

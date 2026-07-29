@@ -50,16 +50,30 @@ class VehicleGateway:
 
     def send_motion(self, target: MotionTarget) -> int:
         safe_target = target
-        if not bool(self.config.get("control_enabled", False)):
+        capture_config = self.config.get("capture", {})
+        balance_config = self.config.get("balance", {})
+        # Output-only is deliberately allowed through the master actuation gate: the
+        # semantic measurement reaches an analyzer or MSPM0, while its enabled bit
+        # remains zero below.  This permits UART bring-up with vehicle control off.
+        output_only_target = (
+            (target.mode == MotionMode.CAPTURE_TARGET_POLAR
+             and bool(capture_config.get("enabled", False))
+             and bool(capture_config.get("output_only", False)))
+            or (target.mode == MotionMode.BALANCE_ROLLER
+                and bool(balance_config.get("enabled", False))
+                and bool(balance_config.get("output_only", False)))
+        )
+        if not bool(self.config.get("control_enabled", False)) and not output_only_target:
             safe_target = target.safe()
         capture = safe_target.capture_target
+        balance = safe_target.balance_state
         capture_permitted = (safe_target.mode == MotionMode.CAPTURE_TARGET_POLAR
-                             and bool(self.config.get("capture", {}).get("enabled", False))
+                             and bool(capture_config.get("enabled", False))
                              and capture is not None
                              and not capture.is_expired(time.monotonic_ns() // 1_000_000))
         if safe_target.mode == MotionMode.CAPTURE_TARGET_POLAR:
             if capture_permitted:
-                output_only = bool(self.config.get("capture", {}).get("output_only", False))
+                output_only = bool(capture_config.get("output_only", False))
                 payload = pack_motion(safe_target.mode, safe_target.enabled and not output_only,
                                       safe_target.valid_for_ms,
                                       track_id=capture.track_id, bearing_mdeg=capture.bearing_mdeg,
@@ -68,6 +82,23 @@ class VehicleGateway:
                                       measurement_age_ms=capture.measurement_age_ms,
                                       target_valid=capture.target_valid,
                                       capture_armed=capture.capture_armed)
+            else:
+                payload = pack_motion(safe_target.mode, False, safe_target.valid_for_ms)
+        elif safe_target.mode == MotionMode.BALANCE_ROLLER:
+            balance_permitted = (bool(balance_config.get("enabled", False))
+                                 and balance is not None
+                                 and not balance.is_expired(time.monotonic_ns() // 1_000_000))
+            if balance_permitted:
+                output_only = bool(balance_config.get("output_only", False))
+                payload = pack_motion(
+                    safe_target.mode, safe_target.enabled and not output_only,
+                    safe_target.valid_for_ms, balance_track_id=balance.track_id,
+                    position_mm=balance.position_mm, target_mm=balance.target_mm,
+                    error_mm=balance.error_mm, velocity_mm_s=balance.velocity_mm_s,
+                    acceleration_mm_s2=balance.acceleration_mm_s2,
+                    balance_confidence_permille=balance.confidence_permille,
+                    balance_measurement_age_ms=balance.measurement_age_ms,
+                    balance_valid=balance.valid)
             else:
                 payload = pack_motion(safe_target.mode, False, safe_target.valid_for_ms)
         else:
