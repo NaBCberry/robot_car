@@ -120,9 +120,12 @@ class SteelballGeometryTests(unittest.TestCase):
             daemon._update_rate("camera", 1100)
             daemon._update_rate("preview", 1000)
             daemon._update_rate("preview", 1050)
+            daemon.latest_frame_width = 1280
+            daemon.latest_frame_height = 720
             status = daemon.status()
             self.assertEqual(status["camera_fps"], 10.0)
             self.assertEqual(status["preview_fps"], 20.0)
+            self.assertEqual((status["frame_width"], status["frame_height"]), (1280, 720))
         finally:
             daemon.close()
 

@@ -66,6 +66,7 @@ class DebugServerTests(unittest.TestCase):
             calibration_page = response.read().decode("utf-8")
             self.assertIn("管槽钢球标定", calibration_page)
             self.assertIn("帧率读取中", calibration_page)
+            self.assertIn("sourceSize", calibration_page)
 
         request = Request(
             f"{self.base_url}/api/roller_balance/calibration",

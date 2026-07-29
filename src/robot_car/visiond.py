@@ -61,6 +61,8 @@ class VisionDaemon:
         self.latest_events: List[Dict[str, Any]] = []
         self.started_ms = monotonic_ms()
         self.last_frame_ms: Optional[int] = None
+        self.latest_frame_width = 0
+        self.latest_frame_height = 0
         self.next_health_ms = 0
         self.web: Optional[DebugServer] = None
         self.web_enabled = bool(config.get("web", {}).get("enabled", False))
@@ -109,6 +111,8 @@ class VisionDaemon:
                 frame = self.camera.latest(timeout=0.1)
                 if frame is not None:
                     self.last_frame_ms = now
+                    self.latest_frame_width = frame.width
+                    self.latest_frame_height = frame.height
                     self._update_rate("camera", frame.timestamp_monotonic_ms)
                     self.metrics.increment("frames_received")
                     events, observed_sources = self.scheduler.process_latest(frame, now)
@@ -141,6 +145,7 @@ class VisionDaemon:
         return {"service": "visiond", "healthy": not bool(self.camera.error),
                 "uptime_ms": monotonic_ms() - self.started_ms, "simulate": self.simulate,
                 "camera_enabled": self.camera.enabled, "camera_error": self.camera.error,
+                "frame_width": self.latest_frame_width, "frame_height": self.latest_frame_height,
                 "camera_fps": round(self.camera_fps, 1), "preview_fps": round(self.preview_fps, 1),
                 "ipc_clients": self.publisher.client_count, "plugins": self.scheduler.health()}
 
