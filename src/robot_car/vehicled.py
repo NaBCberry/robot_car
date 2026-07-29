@@ -73,10 +73,14 @@ class VehicleDaemon:
                     LOG.exception("vehicle receive error")
                 telemetry = self.gateway.telemetry.snapshot()["data"]
                 capture = self.config["vehicle"].get("capture", {})
+                balance = self.config["vehicle"].get("balance", {})
                 # Output-only capture tests send coordinates to an analyzer with motors
                 # disabled. They cannot require an MSPM0 reply, unlike real motion.
-                allow_unseen = (self.is_fake or (bool(capture.get("enabled", False))
-                                  and bool(capture.get("output_only", False))))
+                allow_unseen = (self.is_fake
+                                 or (bool(capture.get("enabled", False))
+                                     and bool(capture.get("output_only", False)))
+                                 or (bool(balance.get("enabled", False))
+                                     and bool(balance.get("output_only", False))))
                 link_ok = self.gateway.watchdog.healthy(now_ms, allow_unseen=allow_unseen)
                 self.state_machine.update_safety(link_ok, bool(telemetry.get("estop", False)),
                                                  str(telemetry.get("fault", "")), now_ms)

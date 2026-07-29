@@ -19,7 +19,7 @@ SAFE_DEFAULTS: Dict[str, Any] = {
     "web": {"enabled": False, "host": "127.0.0.1", "port": 8090,
             "preview_fps": 25, "preview_width": 640, "jpeg_quality": 75},
     "camera": {"enabled": False, "device": "", "width": 640, "height": 480, "fps": 10,
-               "calibration": {"image_to_capture_homography": []}},
+               "calibration": {"image_to_capture_homography": [], "roller_balance": {}}},
     "vision": {"confirmation_frames": 3, "default_ttl_ms": 150, "plugins": []},
     "vehicle": {
         "control_enabled": False,
@@ -36,6 +36,7 @@ SAFE_DEFAULTS: Dict[str, Any] = {
             "no_feedback_policy": {"result": "CAPTURE_ATTEMPTED", "post_capture_action": "HOLD",
                                    "magnet_max_hold_ms": 3000},
         },
+        "balance": {"enabled": False, "output_only": False, "state_timeout_ms": 120},
     },
     "transport": {
         "enabled": False,
@@ -116,6 +117,12 @@ def _validate_safe(config: Dict[str, Any]) -> None:
                 raise ValueError
         except (TypeError, ValueError) as error:
             raise ValueError("camera.calibration.image_to_capture_homography must be finite") from error
+    roller = calibration.get("roller_balance", {})
+    if not isinstance(roller, dict):
+        raise ValueError("camera.calibration.roller_balance must be a mapping")
+    roi = roller.get("roi_xyxy", [])
+    if roi and (not isinstance(roi, list) or len(roi) != 4):
+        raise ValueError("camera.calibration.roller_balance.roi_xyxy must contain four values")
     validity = int(vehicle.get("default_valid_for_ms", 0))
     if not 0 < validity <= 0xFFFF:
         raise ValueError("vehicle.default_valid_for_ms must fit uint16 and be positive")
@@ -135,6 +142,13 @@ def _validate_safe(config: Dict[str, Any]) -> None:
         raise ValueError("vehicle.capture.target_timeout_ms must be positive")
     if int(feedback.get("timeout_ms", 0)) <= 0:
         raise ValueError("vehicle.capture.feedback.timeout_ms must be positive")
+    balance = vehicle.get("balance", {})
+    if not isinstance(balance.get("enabled", False), bool):
+        raise ValueError("vehicle.balance.enabled must be a YAML boolean")
+    if not isinstance(balance.get("output_only", False), bool):
+        raise ValueError("vehicle.balance.output_only must be a YAML boolean")
+    if not 0 < int(balance.get("state_timeout_ms", 0)) <= 0xFFFF:
+        raise ValueError("vehicle.balance.state_timeout_ms must fit uint16 and be positive")
 
 
 def ensure_runtime_dirs(config: Dict[str, Any]) -> Dict[str, Path]:

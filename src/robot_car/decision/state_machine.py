@@ -19,6 +19,7 @@ class VehicleState(str, Enum):
     LINE_FOLLOW = "LINE_FOLLOW"
     VISION_ASSIST = "VISION_ASSIST"
     CAPTURE_TARGET_POLAR = "CAPTURE_TARGET_POLAR"
+    BALANCE_ROLLER = "BALANCE_ROLLER"
     FAILSAFE = "FAILSAFE"
     E_STOP = "E_STOP"
     FAULT = "FAULT"
@@ -36,7 +37,12 @@ class VehicleStateMachine:
 
     def start(self) -> None:
         initial = str(self.config.get("initial_mode", "IDLE"))
-        self.state = VehicleState.LINE_FOLLOW if initial == "LINE_FOLLOW" else VehicleState.IDLE
+        if initial == "LINE_FOLLOW":
+            self.state = VehicleState.LINE_FOLLOW
+        elif initial == "BALANCE_ROLLER":
+            self.state = VehicleState.BALANCE_ROLLER
+        else:
+            self.state = VehicleState.IDLE
 
     def handle_event(self, event: VisionEvent, now_ms: Optional[int] = None) -> None:
         now = monotonic_ms() if now_ms is None else now_ms
@@ -44,8 +50,7 @@ class VehicleStateMachine:
             return
         self.last_vision_ms = now
         if self.state == VehicleState.FAILSAFE and self.failsafe_reason == "vision_timeout":
-            initial = str(self.config.get("initial_mode", "IDLE"))
-            self.state = VehicleState.LINE_FOLLOW if initial == "LINE_FOLLOW" else VehicleState.IDLE
+            self.start()
             self.failsafe_reason = ""
         action = action_for(event)
         if action == "STOP":
@@ -57,6 +62,8 @@ class VehicleStateMachine:
             self.state = VehicleState.VISION_ASSIST
         elif event.event_type == "BALL_TARGET" and self.config.get("capture", {}).get("enabled"):
             self.state = VehicleState.CAPTURE_TARGET_POLAR
+        elif event.event_type == "BALL_BALANCE_STATE" and self.config.get("balance", {}).get("enabled"):
+            self.state = VehicleState.BALANCE_ROLLER
         elif event.event_type == "CAPTURE_CANCEL" and self.state == VehicleState.CAPTURE_TARGET_POLAR:
             self.start()
 
@@ -95,6 +102,9 @@ class VehicleStateMachine:
             return MotionTarget(mode=MotionMode.VISION_ASSIST, enabled=False, valid_for_ms=valid_for)
         if self.state == VehicleState.CAPTURE_TARGET_POLAR:
             return MotionTarget(mode=MotionMode.CAPTURE_TARGET_POLAR, enabled=control_enabled,
+                                valid_for_ms=valid_for)
+        if self.state == VehicleState.BALANCE_ROLLER:
+            return MotionTarget(mode=MotionMode.BALANCE_ROLLER, enabled=control_enabled,
                                 valid_for_ms=valid_for)
         if self.state == VehicleState.VISION_ASSIST:
             return MotionTarget(mode=MotionMode.VISION_ASSIST, enabled=control_enabled,

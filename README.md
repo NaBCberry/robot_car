@@ -237,6 +237,13 @@ cd /userdata/rdkstudio/projects/robot_car
 `config/transport.yaml`。临时标定和实际运动的双确认命令、输出字段及替换标定的方案见
 [`docs/steelball_uart_bringup.md`](docs/steelball_uart_bringup.md)。
 
+## 车载平衡滚珠
+
+H 题使用固定在 25 cm 管槽正上方的相机，输出钢球相对中心的位置、速度和加速度，并以
+`CMD_MOTION/BALANCE_ROLLER` 交给 MSPM0 本地摆杆 PID。它与电磁铁捕获链路相互独立，
+标定、协议字段、启用顺序和网页观测方式见
+[`docs/roller_balance.md`](docs/roller_balance.md)。
+
 ## 视觉插件扩展
 
 所有插件实现 `VisionPlugin`：`initialize`、`process(frame)`、`health` 和

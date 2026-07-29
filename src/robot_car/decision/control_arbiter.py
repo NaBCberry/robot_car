@@ -9,6 +9,7 @@ from robot_car.perception.events import VisionEvent
 from robot_car.protocol.messages import MotionMode
 
 from .capture_target import CaptureTarget
+from .balance_state import BalanceState
 from .motion_target import MotionTarget
 
 
@@ -22,6 +23,10 @@ class ControlArbiter:
         self.capture_enabled = bool(capture.get("enabled", False))
         self.capture_armed = False
         self.latest_target: Optional[CaptureTarget] = None
+        balance = vehicle_config.get("balance", {})
+        self.balance_config = balance
+        self.balance_enabled = bool(balance.get("enabled", False))
+        self.latest_balance: Optional[BalanceState] = None
 
     def handle_event(self, event: VisionEvent, now_ms: int) -> None:
         if event.is_expired(now_ms):
@@ -41,12 +46,28 @@ class ControlArbiter:
             except ValueError as error:
                 self.latest_target = None
                 LOG.warning("discarded invalid steel-ball target: %s", error)
+        if event.event_type == "BALL_BALANCE_STATE" and self.balance_enabled:
+            valid_for_ms = int(self.balance_config.get("state_timeout_ms", 120))
+            try:
+                self.latest_balance = BalanceState.from_event(event, now_ms, valid_for_ms)
+            except ValueError as error:
+                self.latest_balance = None
+                LOG.warning("discarded invalid roller-balance state: %s", error)
 
     def select(self, now_ms: int, fallback_motion: MotionTarget) -> MotionTarget:
         """Return the one semantic CMD_MOTION intent allowed for this cycle."""
         if (not self.capture_enabled
                 or fallback_motion.mode != MotionMode.CAPTURE_TARGET_POLAR):
-            return fallback_motion
+            if (not self.balance_enabled
+                    or fallback_motion.mode != MotionMode.BALANCE_ROLLER):
+                return fallback_motion
+            if (not fallback_motion.enabled or self.latest_balance is None
+                    or self.latest_balance.is_expired(now_ms)):
+                return MotionTarget(mode=MotionMode.BALANCE_ROLLER, enabled=False,
+                                    valid_for_ms=fallback_motion.valid_for_ms)
+            return MotionTarget(mode=MotionMode.BALANCE_ROLLER, enabled=True,
+                                valid_for_ms=self.latest_balance.valid_for_ms,
+                                balance_state=self.latest_balance)
         if (not fallback_motion.enabled or self.latest_target is None
                 or self.latest_target.is_expired(now_ms)):
             return MotionTarget(mode=MotionMode.CAPTURE_TARGET_POLAR, enabled=False,
