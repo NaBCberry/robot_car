@@ -52,7 +52,8 @@ vision:
     - name: roller_balance
       enabled: false
       type: roller_balance
-      interval_ms: 33
+      # 28 ms gives the detector a 35.7 fps ceiling, above the nominal 30 fps camera rate.
+      interval_ms: 28
       priority: 120
       max_processing_ms: 80
       bpu_cores: [0]

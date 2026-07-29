@@ -17,7 +17,7 @@ SAFE_DEFAULTS: Dict[str, Any] = {
         "vision_socket": "/userdata/robot-car/runtime/vision.sock",
     },
     "web": {"enabled": False, "host": "127.0.0.1", "port": 8090,
-            "preview_fps": 25, "preview_width": 640, "jpeg_quality": 75,
+            "preview_fps": 35, "preview_width": 640, "jpeg_quality": 75,
             "calibration_enabled": False},
     "camera": {"enabled": False, "device": "", "width": 640, "height": 480, "fps": 10,
                "calibration": {"image_to_capture_homography": [], "roller_balance": {}}},
