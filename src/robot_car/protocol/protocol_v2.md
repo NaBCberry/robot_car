@@ -17,7 +17,7 @@ UART 帧以固定两字节帧头 `0xA5 0x5A` 开始，**没有帧尾，也不使
 | `protocol_version` | u8 | 固定为 `2` |
 | `message_type` | u8 | 消息类型，见下表 |
 | `sequence` | u16 | 发送方序列号，按 `65536` 取模递增 |
-| `payload_length` | u16 | payload 长度，范围 `0`-`4096` 字节 |
+| `payload_length` | u8 | payload 长度，范围 `0`-`255` 字节 |
 | `payload` | 可变 | 与消息类型对应的内容 |
 | `crc` | u16 | `protocol_version` 至 payload 的 CRC-16/CCITT-FALSE；初值 `0xFFFF`，多项式 `0x1021` |
 

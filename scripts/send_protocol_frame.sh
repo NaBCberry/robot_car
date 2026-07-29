@@ -162,11 +162,11 @@ else:
     kind = number(message_type, "message-type", 0xFF)
     seq = number(sequence, "sequence", 0xFFFF)
     payload = hex_bytes(payload_hex, "payload-hex")
-    if len(payload) > 4096:
-        raise SystemExit("payload 不能超过 4096 字节")
+    if len(payload) > 0xFF:
+        raise SystemExit("payload 不能超过 255 字节")
     if kind in {0x01, 0x02} and allow_control != "1":
         raise SystemExit("控制类消息需要 --unsafe-allow-control")
-    body = struct.pack(">BBHH", 2, kind, seq, len(payload)) + payload
+    body = struct.pack(">BBHB", 2, kind, seq, len(payload)) + payload
     frame = b"\xA5\x5A" + body + struct.pack(">H", crc16_ccitt(body))
     description = f"协议帧 type=0x{kind:02X} sequence={seq} payload={len(payload)}B"
 

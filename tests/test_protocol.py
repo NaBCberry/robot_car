@@ -4,8 +4,8 @@ import unittest
 from robot_car.decision.capture_target import CaptureTarget
 from robot_car.decision.balance_state import BalanceState
 from robot_car.decision.motion_target import MotionTarget
-from robot_car.protocol.framing import (CRC, HEADER, MAGIC, FrameDecoder, ProtocolError,
-                                        crc16_ccitt, decode_packet, encode_frame)
+from robot_car.protocol.framing import (CRC, HEADER, MAGIC, MAX_PAYLOAD, FrameDecoder,
+                                        ProtocolError, crc16_ccitt, decode_packet, encode_frame)
 from robot_car.protocol.messages import (MOTION_COMMON_STRUCT, MOTION_FLAG_ENABLED,
                                          MessageType, MotionMode, PROTOCOL_VERSION,
                                          ProtocolMessage, pack_ack, pack_motion, unpack_ack,
@@ -22,6 +22,15 @@ class ProtocolTests(unittest.TestCase):
         decoder = FrameDecoder()
         self.assertEqual(decoder.feed(frame[:5]), [])
         self.assertEqual(decoder.feed(frame[5:]), [message])
+
+    def test_payload_length_is_one_byte_with_a_255_byte_limit(self):
+        message = ProtocolMessage(MessageType.CMD_EVENT, 0x7E, b"x" * MAX_PAYLOAD)
+        frame = encode_frame(message)
+        self.assertEqual(HEADER.size, 5)
+        self.assertEqual(frame[6], MAX_PAYLOAD)
+        self.assertEqual(FrameDecoder().feed(frame), [message])
+        with self.assertRaisesRegex(ProtocolError, "payload too large"):
+            encode_frame(ProtocolMessage(MessageType.CMD_EVENT, 0x7E, b"x" * (MAX_PAYLOAD + 1)))
 
     def test_crc_failure_resynchronizes_to_next_magic_word(self):
         bad = bytearray(encode_frame(ProtocolMessage(MessageType.HEARTBEAT, 1, b"bad")))

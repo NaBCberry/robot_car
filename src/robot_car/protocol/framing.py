@@ -9,9 +9,9 @@ from .messages import MessageType, PROTOCOL_VERSION, ProtocolMessage
 
 
 MAGIC = b"\xA5\x5A"
-HEADER = struct.Struct(">BBHH")
+HEADER = struct.Struct(">BBHB")
 CRC = struct.Struct(">H")
-MAX_PAYLOAD = 4096
+MAX_PAYLOAD = 0xFF
 
 
 class ProtocolError(ValueError):
