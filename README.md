@@ -239,7 +239,7 @@ cd /userdata/rdkstudio/projects/robot_car
 
 ## 车载平衡滚珠
 
-H 题使用固定在 25 cm 管槽正上方的相机，输出钢球相对中心的位置、速度和加速度，并以
+H 题使用固定在 25 cm 管槽正上方的相机，输出钢球相对中心的距离偏差，并以
 `CMD_MOTION/BALANCE_ROLLER` 交给 MSPM0 本地摆杆 PID。它与电磁铁捕获链路相互独立，
 标定、协议字段、启用顺序和网页观测方式见
 [`docs/roller_balance.md`](docs/roller_balance.md)。

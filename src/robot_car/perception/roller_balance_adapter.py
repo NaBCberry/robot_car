@@ -8,7 +8,6 @@ from typing import Any, Dict, Optional, Tuple
 from robot_car.camera.frame import CameraFrame
 
 from .events import VisionEvent
-from .roller_kinematics import RollerKinematicsEstimator
 from .steelball_adapter import SteelballAdapter
 
 
@@ -21,8 +20,6 @@ class RollerBalanceAdapter(SteelballAdapter):
         self.center_x_px = 0.0
         self.mm_per_pixel = 0.0
         self.axis_direction = 1.0
-        self.target_mm = 0.0
-        self.estimator: Optional[RollerKinematicsEstimator] = None
 
     def initialize(self) -> None:
         options = self.config.get("config", {})
@@ -31,24 +28,14 @@ class RollerBalanceAdapter(SteelballAdapter):
             self.center_x_px = float(options["center_x_px"])
             self.mm_per_pixel = float(options["mm_per_pixel"])
             self.axis_direction = float(options.get("axis_direction", 1))
-            self.target_mm = float(options.get("target_mm", 0))
         except (KeyError, TypeError, ValueError) as error:
             raise ValueError("roller-balance calibration is incomplete") from error
-        if not math.isfinite(self.center_x_px) or not math.isfinite(self.target_mm):
-            raise ValueError("roller-balance center and target must be finite")
+        if not math.isfinite(self.center_x_px):
+            raise ValueError("roller-balance center must be finite")
         if not math.isfinite(self.mm_per_pixel) or self.mm_per_pixel <= 0:
             raise ValueError("roller-balance mm_per_pixel must be positive")
         if self.axis_direction not in {-1.0, 1.0}:
             raise ValueError("roller-balance axis_direction must be -1 or 1")
-        estimate = options.get("estimator", {})
-        if not isinstance(estimate, dict):
-            raise ValueError("roller-balance estimator must be a mapping")
-        self.estimator = RollerKinematicsEstimator(
-            position_alpha=float(estimate.get("position_alpha", 0.65)),
-            velocity_alpha=float(estimate.get("velocity_alpha", 0.35)),
-            acceleration_alpha=float(estimate.get("acceleration_alpha", 0.20)),
-            max_gap_ms=int(estimate.get("max_gap_ms", 250)),
-        )
         super().initialize()
 
     @staticmethod
@@ -80,33 +67,25 @@ class RollerBalanceAdapter(SteelballAdapter):
 
     def _event_from_detection(self, frame: CameraFrame, box: Any, score: float,
                               class_id: int) -> VisionEvent:
-        if self.estimator is None or self.roi is None:
+        if self.roi is None:
             raise RuntimeError("roller-balance adapter is not initialized")
         x1, y1, x2, y2 = (float(value) for value in box)
         center_x = (x1 + x2) / 2.0
         center_y = (y1 + y2) / 2.0
-        measured_position = self.axis_direction * (center_x - self.center_x_px) * self.mm_per_pixel
-        state = self.estimator.update(frame.timestamp_monotonic_ms, measured_position)
-        position_mm = int(round(state.position_mm))
-        target_mm = int(round(self.target_mm))
+        error_mm = int(round(
+            self.axis_direction * (center_x - self.center_x_px) * self.mm_per_pixel))
         payload = {
             "stable_id": "roller_balance_ball",
-            "track_id": 1,
             "class_id": class_id,
             "bbox_xyxy": [round(value, 2) for value in (x1, y1, x2, y2)],
             "center_px": [round(center_x, 2), round(center_y, 2)],
             "roller_roi_xyxy": [round(value, 2) for value in self.roi],
             "center_x_px": round(self.center_x_px, 2),
-            "position_mm": position_mm,
-            "target_mm": target_mm,
-            "error_mm": position_mm - target_mm,
-            "velocity_mm_s": int(round(state.velocity_mm_s)),
-            "acceleration_mm_s2": int(round(state.acceleration_mm_s2)),
+            "error_mm": error_mm,
         }
         return VisionEvent(frame.timestamp_monotonic_ms, self.name, "BALL_BALANCE_STATE", score,
                            payload, frame.frame_id, int(self.config.get("ttl_ms", 120)),
                            frame.width, frame.height, False)
 
     def health(self) -> Dict[str, Any]:
-        return {**super().health(), "calibrated": self.estimator is not None,
-                "target_mm": self.target_mm}
+        return {**super().health(), "calibrated": self.roi is not None}

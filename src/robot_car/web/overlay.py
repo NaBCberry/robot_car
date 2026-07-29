@@ -32,9 +32,7 @@ def draw_overlay(image: Any, events: Iterable[VisionEvent]) -> Any:
             label += (f" {event.payload.get('bearing_mdeg', 0) / 1000.0:+.1f}deg"
                       f" {event.payload.get('range_mm', 0)}mm")
         elif is_balance:
-            label += (f" x={event.payload.get('position_mm', 0):+d}mm"
-                      f" v={event.payload.get('velocity_mm_s', 0):+d}mm/s"
-                      f" a={event.payload.get('acceleration_mm_s2', 0):+d}mm/s2")
+            label += f" error={event.payload.get('error_mm', 0):+d}mm"
         cv2.putText(canvas, label, (x1, max(18, y1 - 8)), cv2.FONT_HERSHEY_SIMPLEX,
                     0.55, color, 2, cv2.LINE_AA)
     return canvas
