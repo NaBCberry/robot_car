@@ -17,7 +17,8 @@ SAFE_DEFAULTS: Dict[str, Any] = {
         "vision_socket": "/userdata/robot-car/runtime/vision.sock",
     },
     "web": {"enabled": False, "host": "127.0.0.1", "port": 8090,
-            "preview_fps": 25, "preview_width": 640, "jpeg_quality": 75},
+            "preview_fps": 25, "preview_width": 640, "jpeg_quality": 75,
+            "calibration_enabled": False},
     "camera": {"enabled": False, "device": "", "width": 640, "height": 480, "fps": 10,
                "calibration": {"image_to_capture_homography": [], "roller_balance": {}}},
     "vision": {"confirmation_frames": 3, "default_ttl_ms": 150, "plugins": []},
@@ -94,6 +95,8 @@ def _validate_safe(config: Dict[str, Any]) -> None:
     jpeg_quality = int(web.get("jpeg_quality", 75))
     if not 1 <= jpeg_quality <= 100:
         raise ValueError("web.jpeg_quality must be between 1 and 100")
+    if not isinstance(web.get("calibration_enabled", False), bool):
+        raise ValueError("web.calibration_enabled must be a YAML boolean")
     if transport.get("enabled"):
         kind = transport.get("type")
         if kind == "uart" and not transport.get("uart", {}).get("device"):

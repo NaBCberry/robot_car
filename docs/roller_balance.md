@@ -15,7 +15,22 @@ flowchart LR
     F --> G[MSPM0 摆杆 PID 与循迹]
 ```
 
-## 标定
+## 网页标定
+
+默认网页服务已启用手工标定。打开 `http://<RDK-IP>:8090/calibration`，或在监控页点击
+“手工标定”，按顺序完成：
+
+1. 点击管槽内壁的左上角。
+2. 点击管槽内壁的右下角。
+3. 点击物理中心 O 点，并填写管槽的有效长度（H 题为 `250 mm`）与正方向。
+4. 点击保存。页面会原子更新 `config/camera.yaml` 的 `roller_balance` 配置；重启 `visiond`
+   后才会使用新值。
+
+管槽必须在画面中近似水平，左、右边界应与管槽轴线对应。当前一维计算使用图像 x 轴；若
+相机画面中的管槽倾斜，应先调整相机安装方向，不能用旋转 ROI 代替。标定完成后建议将
+`web.calibration_enabled` 设为 `false`，关闭配置写入接口。
+
+## 配置字段
 
 在 `config/camera.yaml` 的 `camera.calibration.roller_balance` 中填写：
 

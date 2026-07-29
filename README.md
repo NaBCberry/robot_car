@@ -243,6 +243,7 @@ H 题使用固定在 25 cm 管槽正上方的相机，输出钢球相对中心�
 `CMD_MOTION/BALANCE_ROLLER` 交给 MSPM0 本地摆杆 PID。它与电磁铁捕获链路相互独立，
 标定、协议字段、启用顺序和网页观测方式见
 [`docs/roller_balance.md`](docs/roller_balance.md)。
+网页标定入口为 `http://<RDK-IP>:8090/calibration`，保存后重启 `visiond` 生效。
 
 ## 视觉插件扩展
 

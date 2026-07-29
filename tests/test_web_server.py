@@ -1,6 +1,6 @@
 import json
 import unittest
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 from robot_car.web.server import DebugServer, mjpeg_part
 
@@ -15,6 +15,12 @@ class MjpegPartTests(unittest.TestCase):
 
 class DebugServerTests(unittest.TestCase):
     def setUp(self):
+        self.saved_calibration = None
+
+        def save_calibration(value):
+            self.saved_calibration = value
+            return {"roller_balance": value, "restart_required": True}
+
         try:
             self.server = DebugServer(
                 "127.0.0.1", 0,
@@ -23,6 +29,7 @@ class DebugServerTests(unittest.TestCase):
                 lambda: {"frames_received": 1},
                 lambda: b"preview-bytes",
                 lambda sequence, _timeout: (1, b"preview-bytes") if sequence < 1 else (sequence, None),
+                save_calibration,
             )
         except PermissionError:
             self.skipTest("sandbox disallows local TCP listeners")
@@ -33,11 +40,12 @@ class DebugServerTests(unittest.TestCase):
     def tearDown(self):
         self.server.close()
 
-    def test_page_frame_and_json_endpoints_are_read_only(self):
+    def test_page_frame_json_and_calibration_endpoints(self):
         with urlopen(f"{self.base_url}/", timeout=1) as response:
             page = response.read().decode("utf-8")
             self.assertEqual(response.headers["Content-Type"], "text/html; charset=utf-8")
-        self.assertIn("钢球识别", page)
+        self.assertIn("钢球视觉监控", page)
+        self.assertIn('href="/calibration"', page)
         self.assertIn('src="/video_feed"', page)
 
         with urlopen(f"{self.base_url}/api/frame.jpg", timeout=1) as response:
@@ -51,6 +59,18 @@ class DebugServerTests(unittest.TestCase):
 
         with urlopen(f"{self.base_url}/api/results", timeout=1) as response:
             self.assertEqual(json.loads(response.read()), {"events": []})
+
+        with urlopen(f"{self.base_url}/calibration", timeout=1) as response:
+            self.assertIn("管槽钢球标定", response.read().decode("utf-8"))
+
+        request = Request(
+            f"{self.base_url}/api/roller_balance/calibration",
+            data=json.dumps({"roi_xyxy": [1, 2, 3, 4]}).encode("utf-8"),
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with urlopen(request, timeout=1) as response:
+            self.assertEqual(json.loads(response.read())["restart_required"], True)
+        self.assertEqual(self.saved_calibration, {"roi_xyxy": [1, 2, 3, 4]})
 
 
 if __name__ == "__main__":

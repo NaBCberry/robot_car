@@ -7,3 +7,5 @@ web:
   enabled: true
   host: 192.168.31.93
   port: 8090
+  # Disable after camera calibration: this endpoint can rewrite camera.yaml.
+  calibration_enabled: true

@@ -22,6 +22,7 @@ from robot_car.perception.plugin_registry import create_plugin
 from robot_car.perception.scheduler import PluginScheduler
 from robot_car.perception.stabilizer import EventStabilizer
 from robot_car.web.overlay import draw_overlay
+from robot_car.web.roller_calibration import save_roller_calibration
 from robot_car.web.server import DebugServer
 
 
@@ -29,9 +30,11 @@ LOG = logging.getLogger(__name__)
 
 
 class VisionDaemon:
-    def __init__(self, config: Dict[str, Any], simulate: bool = False) -> None:
+    def __init__(self, config: Dict[str, Any], simulate: bool = False,
+                 config_dir: str | Path = "config") -> None:
         self.config = config
         self.simulate = simulate
+        self.camera_config_path = Path(config_dir) / "camera.yaml"
         self.stop_event = threading.Event()
         self.camera = CameraCapture(config["camera"])
         calibration = config["camera"].get("calibration", {}).get(
@@ -61,6 +64,7 @@ class VisionDaemon:
         self.next_health_ms = 0
         self.web: Optional[DebugServer] = None
         self.web_enabled = bool(config.get("web", {}).get("enabled", False))
+        self.calibration_enabled = bool(config.get("web", {}).get("calibration_enabled", False))
         self._preview_lock = threading.Condition()
         self._latest_frame_jpeg: Optional[bytes] = None
         self._preview_sequence = 0
@@ -76,7 +80,8 @@ class VisionDaemon:
             self.web = DebugServer(str(web_config.get("host", "127.0.0.1")),
                                    int(web_config.get("port", 8090)),
                                    self.status, self.results, self.metrics.snapshot,
-                                   self.preview_frame, self.wait_for_preview_frame)
+                                   self.preview_frame, self.wait_for_preview_frame,
+                                   self.save_roller_calibration if self.calibration_enabled else None)
             self.web.start()
         LOG.info("visiond started; simulate=%s socket=%s", self.simulate, self.publisher.path)
 
@@ -139,6 +144,12 @@ class VisionDaemon:
                   if now - int(event.get("timestamp_monotonic_ms", 0))
                   <= int(event.get("ttl_ms", 0))]
         return {"events": events, "timestamp_monotonic_ms": now}
+
+    def save_roller_calibration(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Persist a manually checked calibration; plugin reload is intentionally explicit."""
+        calibration = save_roller_calibration(self.camera_config_path, payload)
+        self.config["camera"].setdefault("calibration", {})["roller_balance"] = calibration
+        return {"roller_balance": calibration, "restart_required": True}
 
     def preview_frame(self) -> Optional[bytes]:
         with self._preview_lock:
@@ -216,7 +227,7 @@ def main() -> int:
         config = load_config(args.config_dir)
         paths = ensure_runtime_dirs(config)
         configure_logging("visiond", config["runtime"].get("log_level", "INFO"), paths["logs"])
-        daemon = VisionDaemon(config, args.simulate)
+        daemon = VisionDaemon(config, args.simulate, args.config_dir)
     except Exception as error:
         logging.basicConfig(level=logging.INFO)
         LOG.error("safe startup failure: %s", error)
