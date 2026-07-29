@@ -33,6 +33,13 @@ class BalanceControlTests(unittest.TestCase):
         self.assertFalse(expired.enabled)
         self.assertIsNone(expired.balance_state)
 
+    def test_output_only_preserves_fresh_state_while_motion_is_disabled(self):
+        arbiter = ControlArbiter({"balance": {**BALANCE_CONFIG, "output_only": True}})
+        arbiter.handle_event(balance_event(), 1010)
+        motion = arbiter.select(1020, MotionTarget(MotionMode.BALANCE_ROLLER, False, 120))
+        self.assertFalse(motion.enabled)
+        self.assertEqual(motion.balance_state.error_mm, 25)
+
     def test_state_machine_switches_to_balance_mode(self):
         machine = VehicleStateMachine({"control_enabled": True, "initial_mode": "IDLE",
                                        "default_valid_for_ms": 120, "balance": BALANCE_CONFIG})

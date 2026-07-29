@@ -26,6 +26,7 @@ class ControlArbiter:
         balance = vehicle_config.get("balance", {})
         self.balance_config = balance
         self.balance_enabled = bool(balance.get("enabled", False))
+        self.balance_output_only = bool(balance.get("output_only", False))
         self.latest_balance: Optional[BalanceState] = None
 
     def handle_event(self, event: VisionEvent, now_ms: int) -> None:
@@ -61,11 +62,12 @@ class ControlArbiter:
             if (not self.balance_enabled
                     or fallback_motion.mode != MotionMode.BALANCE_ROLLER):
                 return fallback_motion
-            if (not fallback_motion.enabled or self.latest_balance is None
+            if ((not fallback_motion.enabled and not self.balance_output_only)
+                    or self.latest_balance is None
                     or self.latest_balance.is_expired(now_ms)):
                 return MotionTarget(mode=MotionMode.BALANCE_ROLLER, enabled=False,
                                     valid_for_ms=fallback_motion.valid_for_ms)
-            return MotionTarget(mode=MotionMode.BALANCE_ROLLER, enabled=True,
+            return MotionTarget(mode=MotionMode.BALANCE_ROLLER, enabled=fallback_motion.enabled,
                                 valid_for_ms=self.latest_balance.valid_for_ms,
                                 balance_state=self.latest_balance)
         if (not fallback_motion.enabled or self.latest_target is None

@@ -244,6 +244,8 @@ H 题使用固定在 25 cm 管槽正上方的相机，输出钢球相对中心�
 标定、协议字段、启用顺序和网页观测方式见
 [`docs/roller_balance.md`](docs/roller_balance.md)。
 网页标定入口为 `http://<RDK-IP>:8090/calibration`，保存后重启 `visiond` 生效。
+安全串口输出可直接执行 `./scripts/run_roller_balance_uart.sh`；它发送距离偏差但固定
+`enabled=0`。
 
 ## 视觉插件扩展
 

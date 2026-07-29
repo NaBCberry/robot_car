@@ -23,7 +23,7 @@ vehicle:
       magnet_max_hold_ms: 3000
   balance:
     # Top-view roller-balance state. The MSPM0 owns the high-rate rocker PID.
-    enabled: false
-    # Send x/v/a state while forcing enabled=0 for logic-analyzer bring-up.
-    output_only: false
+    enabled: true
+    # Send only error_mm while forcing enabled=0 for UART bring-up.
+    output_only: true
     state_timeout_ms: 120

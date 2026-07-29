@@ -55,3 +55,18 @@ flowchart LR
    心跳过期时停止积分并进入安全摆杆策略。
 
 中心 O 固定为平衡目标，`error_mm=0` 表示钢球位于中心。
+
+## UART 输出启动
+
+默认现场配置使用 `/dev/ttyS1`、`115200` baud、`vehicle.balance.output_only: true`。
+相机标定和 `roller_balance` 插件已准备好后，执行：
+
+```bash
+cd /userdata/rdkstudio/projects/robot_car
+./scripts/run_roller_balance_uart.sh
+```
+
+该脚本同时启动 `visiond` 与 `vehicled`。识别到钢球后，`vehicled` 按
+`vehicle.heartbeat_hz`（默认 20 Hz）发送 `CMD_MOTION/BALANCE_ROLLER`，其中只有
+`error_mm` 是平衡控制量，且 `enabled=0`。MSPM0 必须先适配当前 v2 的 6 字节平衡 payload；
+在完成悬空联调前，不要关闭 `output_only`。

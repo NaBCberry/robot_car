@@ -129,6 +129,39 @@ class VehicleDaemonCaptureTests(unittest.TestCase):
         self.assertEqual(polar[0]["bearing_mdeg"], -12000)
         self.assertEqual(polar[0]["range_mm"], 680)
 
+    def test_output_only_balance_sends_error_without_authorizing_motion(self):
+        now_ms = time.monotonic_ns() // 1_000_000
+        config = {
+            "runtime": {"vision_socket": "/tmp/not-used.sock"},
+            "vehicle": {
+                "control_enabled": False,
+                "initial_mode": "IDLE",
+                "default_valid_for_ms": 120,
+                "heartbeat_hz": 1000,
+                "vision_timeout_ms": 500,
+                "link_timeout_ms": 500,
+                "balance": {"enabled": True, "output_only": True, "state_timeout_ms": 120},
+            },
+        }
+        transport = FakeTransport()
+        daemon = VehicleDaemon(config, transport)
+        daemon.is_fake = False  # Model a real UART without an MSPM0 reply.
+        event = VisionEvent(now_ms, "roller_balance", "BALL_BALANCE_STATE", 0.94,
+                            {"error_mm": -32}, 8, 120, 1280, 720)
+        daemon.subscriber = OneEventSubscriber(daemon, event)
+
+        daemon.run()
+
+        decoder = FrameDecoder()
+        messages = [message for frame in transport.sent for message in decoder.feed(frame)]
+        balance = [unpack_motion(message.payload) for message in messages
+                   if message.message_type == MessageType.CMD_MOTION
+                   and unpack_motion(message.payload)["mode"] == MotionMode.BALANCE_ROLLER]
+        self.assertEqual(len(balance), 1)
+        self.assertFalse(balance[0]["enabled"])
+        self.assertTrue(balance[0]["balance_valid"])
+        self.assertEqual(balance[0]["error_mm"], -32)
+
 
 if __name__ == "__main__":
     unittest.main()

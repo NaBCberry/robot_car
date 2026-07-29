@@ -1,6 +1,6 @@
 transport:
-  enabled: false
-  type: fake
+  enabled: true
+  type: uart
   # Controls protocol HEARTBEAT frames only; CMD_MOTION is still sent on schedule.
   heartbeat:
     enabled: true
