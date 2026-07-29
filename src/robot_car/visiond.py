@@ -8,6 +8,7 @@ import logging
 import signal
 import threading
 import time
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -72,6 +73,7 @@ class VisionDaemon:
         self._preview_sequence = 0
         self._next_preview_ms = 0
         self._preview_events: List[VisionEvent] = []
+        self._preview_source_frames: OrderedDict[int, CameraFrame] = OrderedDict()
         self._last_camera_frame_ms: Optional[int] = None
         self._last_preview_frame_ms: Optional[int] = None
         self.camera_fps = 0.0
@@ -110,6 +112,7 @@ class VisionDaemon:
                     continue
                 frame = self.camera.latest(timeout=0.1)
                 if frame is not None:
+                    self._remember_preview_source_frame(frame)
                     self.last_frame_ms = now
                     self.latest_frame_width = frame.width
                     self.latest_frame_height = frame.height
@@ -118,8 +121,9 @@ class VisionDaemon:
                     events, observed_sources = self.scheduler.process_latest(frame, now)
                     confirmed_events = self.stabilizer.update(events, now, observed_sources)
                     self._publish(confirmed_events)
-                    self._update_preview(frame, self._overlay_events(
-                        confirmed_events, observed_sources, now))
+                    overlay_events = self._overlay_events(confirmed_events, observed_sources, now)
+                    self._update_preview(self._preview_frame_for_events(frame, overlay_events),
+                                         overlay_events)
                 health_interval = int(self.config["vision"].get("health_interval_ms", 100))
                 if (self.camera.enabled and not self.camera.error and self.last_frame_ms is not None
                         and now - self.last_frame_ms <= int(self.config["vehicle"].get("vision_timeout_ms", 500))
@@ -186,6 +190,20 @@ class VisionDaemon:
         self._preview_events = [event for event in self._preview_events
                                 if not event.is_expired(now_ms)]
         return self._preview_events.copy()
+
+    def _remember_preview_source_frame(self, frame: CameraFrame) -> None:
+        """Retain a short image history so asynchronous boxes stay frame-aligned."""
+        self._preview_source_frames[frame.frame_id] = frame
+        self._preview_source_frames.move_to_end(frame.frame_id)
+        while len(self._preview_source_frames) > 8:
+            self._preview_source_frames.popitem(last=False)
+
+    def _preview_frame_for_events(self, fallback: CameraFrame,
+                                  events: List[VisionEvent]) -> CameraFrame:
+        if not events:
+            return fallback
+        newest = max(events, key=lambda event: (event.timestamp_monotonic_ms, event.frame_id))
+        return self._preview_source_frames.get(newest.frame_id, fallback)
 
     def _update_preview(self, frame: CameraFrame, events: List[VisionEvent]) -> None:
         if not self.web_enabled:

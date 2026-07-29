@@ -26,6 +26,23 @@ class SteelballGeometryTests(unittest.TestCase):
         finally:
             daemon.close()
 
+    def test_preview_uses_the_detection_source_frame_for_its_overlay(self):
+        daemon = VisionDaemon({
+            "camera": {"enabled": False, "calibration": {"image_to_capture_homography": []}},
+            "runtime": {"vision_socket": "/tmp/not-used.sock"},
+            "vision": {"plugins": []},
+        })
+        detected_frame = CameraFrame(4, 1000, object(), 1280, 720)
+        latest_frame = CameraFrame(5, 1033, object(), 1280, 720)
+        event = VisionEvent(1000, "roller_balance", "BALL_BALANCE_STATE", 0.9,
+                            {"error_mm": 10}, 4, 120, 1280, 720, True)
+        try:
+            daemon._remember_preview_source_frame(detected_frame)
+            daemon._remember_preview_source_frame(latest_frame)
+            self.assertIs(daemon._preview_frame_for_events(latest_frame, [event]), detected_frame)
+        finally:
+            daemon.close()
+
     def test_adapter_uses_detection_runtime_for_det_model(self):
         created_configs = []
 
