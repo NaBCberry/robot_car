@@ -109,6 +109,23 @@ class SteelballGeometryTests(unittest.TestCase):
         finally:
             daemon.close()
 
+    def test_visiond_reports_separate_camera_and_preview_rates(self):
+        daemon = VisionDaemon({
+            "camera": {"enabled": False, "calibration": {}},
+            "runtime": {"vision_socket": "/tmp/not-used.sock"},
+            "vision": {"plugins": []},
+        })
+        try:
+            daemon._update_rate("camera", 1000)
+            daemon._update_rate("camera", 1100)
+            daemon._update_rate("preview", 1000)
+            daemon._update_rate("preview", 1050)
+            status = daemon.status()
+            self.assertEqual(status["camera_fps"], 10.0)
+            self.assertEqual(status["preview_fps"], 20.0)
+        finally:
+            daemon.close()
+
     def test_adapter_prefers_lowest_ball_over_higher_confidence(self):
         adapter = SteelballAdapter("steelball", {"config": {"target_class_id": 0}})
         selected = adapter._select_primary(

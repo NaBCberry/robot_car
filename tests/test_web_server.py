@@ -46,6 +46,8 @@ class DebugServerTests(unittest.TestCase):
             self.assertEqual(response.headers["Content-Type"], "text/html; charset=utf-8")
         self.assertIn("钢球视觉监控", page)
         self.assertIn('href="/calibration"', page)
+        self.assertIn("相机帧率", page)
+        self.assertIn("网页预览帧率", page)
         self.assertIn('src="/video_feed"', page)
 
         with urlopen(f"{self.base_url}/api/frame.jpg", timeout=1) as response:
@@ -61,7 +63,9 @@ class DebugServerTests(unittest.TestCase):
             self.assertEqual(json.loads(response.read()), {"events": []})
 
         with urlopen(f"{self.base_url}/calibration", timeout=1) as response:
-            self.assertIn("管槽钢球标定", response.read().decode("utf-8"))
+            calibration_page = response.read().decode("utf-8")
+            self.assertIn("管槽钢球标定", calibration_page)
+            self.assertIn("帧率读取中", calibration_page)
 
         request = Request(
             f"{self.base_url}/api/roller_balance/calibration",

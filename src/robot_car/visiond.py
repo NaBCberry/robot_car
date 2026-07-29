@@ -70,6 +70,10 @@ class VisionDaemon:
         self._preview_sequence = 0
         self._next_preview_ms = 0
         self._preview_events: List[VisionEvent] = []
+        self._last_camera_frame_ms: Optional[int] = None
+        self._last_preview_frame_ms: Optional[int] = None
+        self.camera_fps = 0.0
+        self.preview_fps = 0.0
 
     def start(self) -> None:
         self.publisher.start()
@@ -105,6 +109,7 @@ class VisionDaemon:
                 frame = self.camera.latest(timeout=0.1)
                 if frame is not None:
                     self.last_frame_ms = now
+                    self._update_rate("camera", frame.timestamp_monotonic_ms)
                     self.metrics.increment("frames_received")
                     events, observed_sources = self.scheduler.process_latest(frame, now)
                     confirmed_events = self.stabilizer.update(events, now, observed_sources)
@@ -136,6 +141,7 @@ class VisionDaemon:
         return {"service": "visiond", "healthy": not bool(self.camera.error),
                 "uptime_ms": monotonic_ms() - self.started_ms, "simulate": self.simulate,
                 "camera_enabled": self.camera.enabled, "camera_error": self.camera.error,
+                "camera_fps": round(self.camera_fps, 1), "preview_fps": round(self.preview_fps, 1),
                 "ipc_clients": self.publisher.client_count, "plugins": self.scheduler.health()}
 
     def results(self) -> Dict[str, Any]:
@@ -196,12 +202,25 @@ class VisionDaemon:
             quality = int(web_config.get("jpeg_quality", 75))
             encoded, jpeg = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, quality])
             if encoded:
+                self._update_rate("preview", now)
                 with self._preview_lock:
                     self._latest_frame_jpeg = jpeg.tobytes()
                     self._preview_sequence += 1
                     self._preview_lock.notify_all()
         except Exception:
             LOG.exception("failed to generate web preview")
+
+    def _update_rate(self, kind: str, timestamp_ms: int) -> None:
+        """Keep a stable display rate without delaying camera or preview work."""
+        previous_name = f"_last_{kind}_frame_ms"
+        previous = getattr(self, previous_name)
+        setattr(self, previous_name, timestamp_ms)
+        if previous is None or timestamp_ms <= previous:
+            return
+        instantaneous = 1000.0 / (timestamp_ms - previous)
+        current_name = f"{kind}_fps"
+        current = getattr(self, current_name)
+        setattr(self, current_name, instantaneous if current == 0.0 else 0.25 * instantaneous + 0.75 * current)
 
     def close(self) -> None:
         self.stop_event.set()
