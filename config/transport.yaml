@@ -3,7 +3,7 @@ transport:
   type: uart
   # Controls protocol HEARTBEAT frames only; CMD_MOTION is still sent on schedule.
   heartbeat:
-    enabled: true
+    enabled: false
   uart:
     device: "/dev/ttyS1"
     baudrate: 115200

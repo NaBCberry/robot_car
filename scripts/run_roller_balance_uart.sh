@@ -18,10 +18,6 @@ if [[ ! -c /dev/ttyS1 ]]; then
     echo "UART 不是字符设备：/dev/ttyS1" >&2
     exit 2
 fi
-if ! python3 -c 'import serial' >/dev/null 2>&1; then
-    echo "缺少 pyserial，无法打开 /dev/ttyS1。" >&2
-    exit 2
-fi
 
 cd "${project_root}"
 echo "输出模式：向 /dev/ttyS1 发送 BALANCE_ROLLER/error_mm，enabled=0。" >&2

@@ -70,20 +70,3 @@ cd /userdata/rdkstudio/projects/robot_car
 `vehicle.heartbeat_hz`（默认 20 Hz）发送 `CMD_MOTION/BALANCE_ROLLER`，其中只有
 `error_mm` 是平衡控制量，且 `enabled=0`。MSPM0 必须先适配当前 v2 的 6 字节平衡 payload；
 在完成悬空联调前，不要关闭 `output_only`。
-
-### 先验证 UART 电气链路
-
-在不启动相机和模型时，可直接发送一次 `error_mm=-32` 的安全平衡帧。逻辑分析仪应看到
-一帧以 `A5 5A` 开始、payload 为 `05 08 00 78 FF E0` 的协议数据；其中
-`enabled=0,balance_valid=1`，MSPM0 不得驱动电机。
-
-```bash
-cd /userdata/rdkstudio/projects/robot_car
-./scripts/send_protocol_frame.sh --message-type 0x01 \
-  --payload-hex '05 08 00 78 FF E0' \
-  --unsafe-allow-control --send --repeat 20 --interval-ms 50
-```
-
-若此命令没有波形，请先在 RDK 板端检查 `/dev/ttyS1` 是否存在、UART3 引脚复用和 TX/RX/GND
-连线；这与视觉识别链路无关。若此命令有波形而一键脚本没有，请查看两个服务是否仍在运行：
-`pgrep -af 'robot_car.(visiond|vehicled)'`。
