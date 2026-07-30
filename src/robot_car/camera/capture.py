@@ -49,12 +49,18 @@ class CameraCapture:
             self._capture.release()
             self._capture = None
             raise RuntimeError(f"failed to open configured camera: {device}")
-        self._capture.set(cv2.CAP_PROP_FRAME_WIDTH, int(self.config.get("width", 1280)))
-        self._capture.set(cv2.CAP_PROP_FRAME_HEIGHT, int(self.config.get("height", 720)))
-        self._capture.set(cv2.CAP_PROP_FPS, int(self.config.get("fps", 30)))
         pixel_format = str(self.config.get("pixel_format", "MJPG"))
         if len(pixel_format) == 4:
             self._capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*pixel_format))
+        self._capture.set(cv2.CAP_PROP_FRAME_WIDTH, int(self.config.get("width", 1280)))
+        self._capture.set(cv2.CAP_PROP_FRAME_HEIGHT, int(self.config.get("height", 720)))
+        self._capture.set(cv2.CAP_PROP_FPS, int(self.config.get("fps", 30)))
+        actual_format = int(self._capture.get(cv2.CAP_PROP_FOURCC)).to_bytes(4, "little").decode(
+            "ascii", errors="replace")
+        LOG.info("camera negotiated device=%s format=%s size=%dx%d fps=%.1f",
+                 device, actual_format, int(self._capture.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                 int(self._capture.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+                 self._capture.get(cv2.CAP_PROP_FPS))
         self._thread = threading.Thread(target=self._run, name="camera-capture", daemon=True)
         self._thread.start()
 

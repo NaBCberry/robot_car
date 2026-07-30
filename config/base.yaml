@@ -8,6 +8,6 @@ web:
   host: 192.168.31.93
   port: 8090
   # Ceiling only: actual FPS is limited by camera delivery and JPEG encoding.
-  preview_fps: 35
+  preview_fps: 60
   # Disable after camera calibration: this endpoint can rewrite camera.yaml.
   calibration_enabled: true

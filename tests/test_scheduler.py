@@ -36,6 +36,22 @@ class PluginSchedulerTests(unittest.TestCase):
         finally:
             scheduler.close()
 
+    def test_zero_interval_starts_the_next_frame_immediately(self):
+        plugin = ImmediatePlugin("test", {"enabled": True, "interval_ms": 0,
+                                           "max_processing_ms": 0})
+        scheduler = PluginScheduler([plugin])
+        frame = CameraFrame(1, 0, None, 640, 480)
+        try:
+            scheduler.process_latest(frame, 0)
+            scheduler.slots[0].future.result(timeout=1)
+            events, sources = scheduler.process_latest(frame, 0)
+            self.assertEqual(sources, {"test"})
+            self.assertEqual(len(events), 1)
+            self.assertIsNotNone(scheduler.slots[0].future)
+            self.assertEqual(scheduler.slots[0].max_processing_ms, 0)
+        finally:
+            scheduler.close()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -32,8 +32,8 @@ class PluginSlot:
 class PluginScheduler:
     def __init__(self, plugins: List[VisionPlugin]) -> None:
         ordered = sorted(plugins, key=lambda item: int(item.config.get("priority", 0)), reverse=True)
-        self.slots = [PluginSlot(item, max(1, int(item.config.get("interval_ms", 100))),
-                     max(1, int(item.config.get("max_processing_ms", 100))),
+        self.slots = [PluginSlot(item, max(0, int(item.config.get("interval_ms", 100))),
+                     max(0, int(item.config.get("max_processing_ms", 100))),
                      int(item.config.get("priority", 0))) for item in ordered]
         self.executor = ThreadPoolExecutor(max_workers=max(1, len(ordered)), thread_name_prefix="vision-plugin")
 
@@ -70,7 +70,8 @@ class PluginScheduler:
                             slot.plugin.error = str(error)
                         LOG.exception("plugin %s failed; retry in %d ms", slot.plugin.name, delay)
                     slot.future = None
-                elif now_ms - slot.started_ms > slot.max_processing_ms:
+                elif (slot.max_processing_ms > 0
+                      and now_ms - slot.started_ms > slot.max_processing_ms):
                     slot.failures += 1
                     slot.next_run_ms = now_ms + min(30_000, 500 * (2 ** min(slot.failures, 6)))
                     LOG.warning("plugin %s exceeded %d ms; skipping new frames", slot.plugin.name,

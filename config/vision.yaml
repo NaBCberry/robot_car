@@ -50,12 +50,13 @@ vision:
         calibration_path: ""
         image_to_capture_homography: []
     - name: roller_balance
-      enabled: false
+      enabled: true
       type: roller_balance
-      # 28 ms gives the detector a 35.7 fps ceiling, above the nominal 30 fps camera rate.
-      interval_ms: 28
+      # Zero means run again as soon as the previous inference completes.
+      interval_ms: 0
       priority: 120
-      max_processing_ms: 80
+      # Zero disables scheduler timeout; model throughput is the only limit.
+      max_processing_ms: 0
       bpu_cores: [0]
       config:
         model_path: "/userdata/rdkstudio/projects/ultralytics_yolo26/model/steelball-yolo26n-det_bayese_640x640_nv12.bin"

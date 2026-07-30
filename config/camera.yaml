@@ -1,32 +1,31 @@
 camera:
-  # Safety default: no real device is opened until explicitly enabled.
-  enabled: false
-  device: "/dev/video0"
+  enabled: true
+  device: /dev/video0
   width: 1280
   height: 720
-  fps: 30
+  # This camera supports 1280x720 MJPG at 60 fps.  MJPG must be negotiated first
+  # in CameraCapture; uncompressed 720p modes commonly fall back to 15 fps.
+  fps: 60
   pixel_format: MJPG
-  test_image: ""
+  test_image: ''
   reconnect_delay_ms: 1000
   calibration:
-    # TEMPORARY ONLY: affine approximation for a 1280x720 image. It maps the
-    # steel-ball bbox bottom-center (u, v) to the electromagnet capture frame:
-    # forward_mm = 1200 - 1.5 * v; lateral_mm = 1.2 * u - 768.
-    # Replace with a measured ground-plane homography before authorizing motion.
     image_to_capture_homography:
-      - 0.0
-      - -1.5
-      - 1200.0
-      - 1.2
-      - 0.0
-      - -768.0
-      - 0.0
-      - 0.0
-      - 1.0
-    # Fill these from the top-view roller-balance camera calibration before enabling
-    # the roller_balance plugin. x grows from the image center_x_px along axis_direction.
+    - 0.0
+    - -1.5
+    - 1200.0
+    - 1.2
+    - 0.0
+    - -768.0
+    - 0.0
+    - 0.0
+    - 1.0
     roller_balance:
-      roi_xyxy: []
-      center_x_px: 0
-      mm_per_pixel: 0
+      roi_xyxy:
+      - 68.84
+      - 296.59
+      - 1209.56
+      - 384.24
+      center_x_px: 625.99
+      mm_per_pixel: 0.219161
       axis_direction: 1
