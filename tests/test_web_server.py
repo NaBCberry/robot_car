@@ -49,7 +49,6 @@ class DebugServerTests(unittest.TestCase):
         self.assertIn("相机帧率", page)
         self.assertIn("网页预览帧率", page)
         self.assertIn('src="/video_feed"', page)
-        self.assertIn("EventSource('/api/updates')", page)
         self.assertIn("/api/updates.json", page)
 
         with urlopen(f"{self.base_url}/api/frame.jpg", timeout=1) as response:
@@ -63,12 +62,6 @@ class DebugServerTests(unittest.TestCase):
 
         with urlopen(f"{self.base_url}/api/results", timeout=1) as response:
             self.assertEqual(json.loads(response.read()), {"events": []})
-
-        with urlopen(f"{self.base_url}/api/updates", timeout=1) as response:
-            self.assertEqual(response.headers["Content-Type"], "text/event-stream; charset=utf-8")
-            self.assertEqual(response.readline(), b"event: update\\n")
-            self.assertEqual(json.loads(response.readline()[6:]),
-                             {"status": {"healthy": True}, "results": {"events": []}})
 
         with urlopen(f"{self.base_url}/api/updates.json", timeout=1) as response:
             self.assertEqual(json.loads(response.read()),

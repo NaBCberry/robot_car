@@ -27,7 +27,7 @@ aside{background:#fff;border:1px solid #d8e0e5;padding:16px;align-self:start}.la
 <div class="label">状态</div><div class="value" id="target">未检测到钢球</div><div class="label">相机帧率</div><div class="value" id="camera-fps">-</div><div class="label">网页预览帧率</div><div class="value" id="preview-fps">-</div><div class="label">中心距离偏差</div><div class="value" id="error">-</div><div class="label">置信度</div><div class="value" id="confidence">-</div><div class="label">帧号</div><div class="value" id="frame-id">-</div></aside></main><script>
 const text=(id,value)=>document.getElementById(id).textContent=value;
 function render(status,result){const events=result.events||[];const balance=events.find(e=>e.event_type==='BALL_BALANCE_STATE');const target=events.find(e=>e.event_type==='BALL_TARGET');text('state',status.healthy?'视觉服务运行中':'视觉服务异常');text('camera-fps',Number(status.camera_fps||0).toFixed(1)+' fps');text('preview-fps',Number(status.preview_fps||0).toFixed(1)+' fps');if(balance){const p=balance.payload||{};text('target','平衡状态有效');text('error',(p.error_mm??'-')+' mm');text('confidence',(balance.confidence*100).toFixed(1)+'%');text('frame-id',balance.frame_id);}else if(target){text('target','捕获目标有效');text('error','-');text('confidence',(target.confidence*100).toFixed(1)+'%');text('frame-id',target.frame_id);}else{for(const id of ['error','confidence','frame-id'])text(id,'-');text('target','未检测到钢球');}}
-let fallbackTimer=0,fallbackActive=false;async function pollFallback(){if(!fallbackActive)return;try{const value=await fetch('/api/updates.json',{cache:'no-store'}).then(r=>r.json());render(value.status,value.results);const fps=Math.max(1,Number(value.status.preview_fps)||30);if(fallbackActive)fallbackTimer=setTimeout(pollFallback,1000/fps)}catch(_){text('state','等待视觉数据');if(fallbackActive)fallbackTimer=setTimeout(pollFallback,1000)}}function startFallback(){if(!fallbackActive){fallbackActive=true;pollFallback()}}function stopFallback(){fallbackActive=false;if(fallbackTimer){clearTimeout(fallbackTimer);fallbackTimer=0}}if(window.EventSource){const updates=new EventSource('/api/updates');updates.addEventListener('update',event=>{stopFallback();const value=JSON.parse(event.data);render(value.status,value.results)});updates.onerror=startFallback}else{startFallback()}
+async function refresh(){try{const value=await fetch('/api/updates.json',{cache:'no-store'}).then(r=>r.json());render(value.status,value.results);const fps=Math.max(1,Number(value.status.preview_fps)||30);setTimeout(refresh,1000/fps)}catch(_){text('state','等待视觉数据');setTimeout(refresh,1000)}}refresh()
 </script></body></html>"""
 
 
@@ -45,7 +45,7 @@ const frame=document.getElementById('frame'),canvas=document.getElementById('can
 function sync(){const r=frame.getBoundingClientRect();canvas.width=Math.max(1,Math.round(r.width));canvas.height=Math.max(1,Math.round(r.height));draw()}function showStatus(value,kind=''){const e=document.getElementById('status');e.textContent=value;e.className='status '+kind}function update(){document.getElementById('step').textContent=stepText[Math.min(points.length,3)];document.getElementById('points').textContent=points.length?points.map((p,i)=>keys[i]+' ('+p.x.toFixed(1)+', '+p.y.toFixed(1)+')').join('  '):'尚未选点';document.getElementById('save').disabled=points.length!==3;draw()}
 function draw(){ctx.clearRect(0,0,canvas.width,canvas.height);if(!frame.naturalWidth)return;const sx=canvas.width/frame.naturalWidth,sy=canvas.height/frame.naturalHeight;ctx.lineWidth=2;ctx.font='13px Arial';points.forEach((p,i)=>{const x=p.x*sx,y=p.y*sy;ctx.fillStyle='#ffd24a';ctx.beginPath();ctx.arc(x,y,5,0,Math.PI*2);ctx.fill();ctx.fillText(keys[i],x+8,y-8)});if(points.length>=2){const [a,b]=points;ctx.strokeStyle='#55d5a2';ctx.strokeRect(a.x*sx,a.y*sy,(b.x-a.x)*sx,(b.y-a.y)*sy)}if(points.length===3){const p=points[2];ctx.strokeStyle='#ff9f43';ctx.beginPath();ctx.moveTo(p.x*sx,0);ctx.lineTo(p.x*sx,canvas.height);ctx.stroke()}}
 canvas.addEventListener('click',event=>{if(points.length>=3||!frame.naturalWidth)return;const r=canvas.getBoundingClientRect();points.push({x:(event.clientX-r.left)*frame.naturalWidth/r.width,y:(event.clientY-r.top)*frame.naturalHeight/r.height});showStatus('');update()});document.getElementById('reset').addEventListener('click',()=>{points=[];showStatus('');update()});frame.addEventListener('load',sync);window.addEventListener('resize',sync);
-document.getElementById('save').addEventListener('click',async()=>{const length=Number(document.getElementById('length').value);if(!Number.isFinite(length)){showStatus('请输入有效的管槽长度。','error');return}if(!frame.naturalWidth||!frame.naturalHeight||!sourceSize.width||!sourceSize.height){showStatus('尚未得到相机原始图像尺寸，请等待视频和帧率显示正常。','error');return}const sx=sourceSize.width/frame.naturalWidth,sy=sourceSize.height/frame.naturalHeight,[a,b,center]=points;const payload={roi_xyxy:[a.x*sx,a.y*sy,b.x*sx,b.y*sy],center_x_px:center.x*sx,center_y_px:center.y*sy,tube_length_mm:length,axis_direction:Number(document.querySelector('input[name="direction"]:checked').value)};try{const response=await fetch('/api/roller_balance/calibration',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const result=await response.json();if(!response.ok)throw new Error(result.error||'保存失败');showStatus('已保存：'+JSON.stringify(result.roller_balance)+'。请重启 visiond 后再启用平衡插件。','ok')}catch(error){showStatus(error.message,'error')}});const updates=new EventSource('/api/updates');updates.addEventListener('update',event=>{const status=JSON.parse(event.data).status;sourceSize={width:Number(status.frame_width||0),height:Number(status.frame_height||0)};document.getElementById('fps').textContent='相机 '+Number(status.camera_fps||0).toFixed(1)+' fps / 网页 '+Number(status.preview_fps||0).toFixed(1)+' fps'});updates.onerror=()=>document.getElementById('fps').textContent='帧率不可用';sync();update();
+document.getElementById('save').addEventListener('click',async()=>{const length=Number(document.getElementById('length').value);if(!Number.isFinite(length)){showStatus('请输入有效的管槽长度。','error');return}if(!frame.naturalWidth||!frame.naturalHeight||!sourceSize.width||!sourceSize.height){showStatus('尚未得到相机原始图像尺寸，请等待视频和帧率显示正常。','error');return}const sx=sourceSize.width/frame.naturalWidth,sy=sourceSize.height/frame.naturalHeight,[a,b,center]=points;const payload={roi_xyxy:[a.x*sx,a.y*sy,b.x*sx,b.y*sy],center_x_px:center.x*sx,center_y_px:center.y*sy,tube_length_mm:length,axis_direction:Number(document.querySelector('input[name="direction"]:checked').value)};try{const response=await fetch('/api/roller_balance/calibration',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const result=await response.json();if(!response.ok)throw new Error(result.error||'保存失败');showStatus('已保存：'+JSON.stringify(result.roller_balance)+'。请重启 visiond 后再启用平衡插件。','ok')}catch(error){showStatus(error.message,'error')}});async function refreshFps(){try{const value=await fetch('/api/updates.json',{cache:'no-store'}).then(r=>r.json()),status=value.status;sourceSize={width:Number(status.frame_width||0),height:Number(status.frame_height||0)};document.getElementById('fps').textContent='相机 '+Number(status.camera_fps||0).toFixed(1)+' fps / 网页 '+Number(status.preview_fps||0).toFixed(1)+' fps';const fps=Math.max(1,Number(status.preview_fps)||30);setTimeout(refreshFps,1000/fps)}catch(_){document.getElementById('fps').textContent='帧率不可用';setTimeout(refreshFps,1000)}}refreshFps();sync();update();
 </script></body></html>"""
 
 
@@ -68,17 +68,6 @@ class DebugServer:
                 sequence, image = wait_frame(sequence, 1.0)
                 if image is not None:
                     yield mjpeg_part(image)
-
-        def updates_stream() -> Iterator[bytes]:
-            """Emit status and results exactly once per generated preview frame."""
-            sequence = 0
-            while True:
-                sequence, image = wait_frame(sequence, 1.0)
-                if image is None:
-                    continue
-                payload = json.dumps({"status": status(), "results": results()},
-                                     ensure_ascii=False).encode("utf-8")
-                yield b"event: update\\ndata: " + payload + b"\\n\\n"
 
         class Handler(BaseHTTPRequestHandler):
             def send_json(self, status_code: int, value: Dict[str, Any]) -> None:
@@ -132,19 +121,6 @@ class DebugServer:
                     self.end_headers()
                     try:
                         for body in frame_stream():
-                            self.wfile.write(body)
-                            self.wfile.flush()
-                    except (BrokenPipeError, ConnectionResetError):
-                        pass
-                    return
-                if path == "/api/updates":
-                    self.send_response(200)
-                    self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-                    self.send_header("Cache-Control", "no-store")
-                    self.send_header("Connection", "keep-alive")
-                    self.end_headers()
-                    try:
-                        for body in updates_stream():
                             self.wfile.write(body)
                             self.wfile.flush()
                     except (BrokenPipeError, ConnectionResetError):
