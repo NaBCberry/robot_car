@@ -27,7 +27,7 @@ aside{background:#fff;border:1px solid #d8e0e5;padding:16px;align-self:start}.la
 <div class="label">状态</div><div class="value" id="target">未检测到钢球</div><div class="label">相机帧率</div><div class="value" id="camera-fps">-</div><div class="label">网页预览帧率</div><div class="value" id="preview-fps">-</div><div class="label">中心距离偏差</div><div class="value" id="error">-</div><div class="label">置信度</div><div class="value" id="confidence">-</div><div class="label">帧号</div><div class="value" id="frame-id">-</div></aside></main><script>
 const text=(id,value)=>document.getElementById(id).textContent=value;
 function render(status,result){const events=result.events||[];const balance=events.find(e=>e.event_type==='BALL_BALANCE_STATE');const target=events.find(e=>e.event_type==='BALL_TARGET');text('state',status.healthy?'视觉服务运行中':'视觉服务异常');text('camera-fps',Number(status.camera_fps||0).toFixed(1)+' fps');text('preview-fps',Number(status.preview_fps||0).toFixed(1)+' fps');if(balance){const p=balance.payload||{};text('target','平衡状态有效');text('error',(p.error_mm??'-')+' mm');text('confidence',(balance.confidence*100).toFixed(1)+'%');text('frame-id',balance.frame_id);}else if(target){text('target','捕获目标有效');text('error','-');text('confidence',(target.confidence*100).toFixed(1)+'%');text('frame-id',target.frame_id);}else{for(const id of ['error','confidence','frame-id'])text(id,'-');text('target','未检测到钢球');}}
-const updates=new EventSource('/api/updates');updates.addEventListener('update',event=>{const value=JSON.parse(event.data);render(value.status,value.results)});updates.onerror=()=>text('state','等待视觉数据');
+let fallbackTimer=0,fallbackActive=false;async function pollFallback(){if(!fallbackActive)return;try{const value=await fetch('/api/updates.json',{cache:'no-store'}).then(r=>r.json());render(value.status,value.results);const fps=Math.max(1,Number(value.status.preview_fps)||30);if(fallbackActive)fallbackTimer=setTimeout(pollFallback,1000/fps)}catch(_){text('state','等待视觉数据');if(fallbackActive)fallbackTimer=setTimeout(pollFallback,1000)}}function startFallback(){if(!fallbackActive){fallbackActive=true;pollFallback()}}function stopFallback(){fallbackActive=false;if(fallbackTimer){clearTimeout(fallbackTimer);fallbackTimer=0}}if(window.EventSource){const updates=new EventSource('/api/updates');updates.addEventListener('update',event=>{stopFallback();const value=JSON.parse(event.data);render(value.status,value.results)});updates.onerror=startFallback}else{startFallback()}
 </script></body></html>"""
 
 
@@ -59,7 +59,8 @@ class DebugServer:
     def __init__(self, host: str, port: int, status: JsonProvider,
                  results: JsonProvider, metrics: JsonProvider, frame: FrameProvider,
                  wait_frame: FrameWaiter, calibration_saver: Optional[CalibrationSaver] = None) -> None:
-        providers = {"/api/status": status, "/api/results": results, "/api/metrics": metrics}
+        providers = {"/api/status": status, "/api/results": results, "/api/metrics": metrics,
+                     "/api/updates.json": lambda: {"status": status(), "results": results()}}
 
         def frame_stream() -> Iterator[bytes]:
             sequence = 0
