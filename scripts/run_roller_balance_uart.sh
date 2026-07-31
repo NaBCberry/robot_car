@@ -20,7 +20,7 @@ if [[ ! -c /dev/ttyS1 ]]; then
 fi
 
 cd "${project_root}"
-echo "输出模式：向 /dev/ttyS1 发送 BALANCE_ROLLER/error_mm，enabled=0。" >&2
+echo "控制模式：向 /dev/ttyS1 发送 BALANCE_ROLLER/error_mm；有效状态会授权 M0 执行。" >&2
 echo "请确认 MSPM0 已按当前 v2 的 6 字节平衡 payload 解析。" >&2
 
 PYTHONPATH=/userdata/rdkstudio/projects:"${project_root}/src" \

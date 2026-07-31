@@ -5,7 +5,8 @@ runtime:
 
 web:
   enabled: true
-  host: 192.168.31.93
+  # Listen on the board even when DHCP changes its LAN address.
+  host: 0.0.0.0
   port: 8090
   # Ceiling only: actual FPS is limited by camera delivery and JPEG encoding.
   preview_fps: 60
