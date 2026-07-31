@@ -41,7 +41,8 @@ class RollerControlDaemon:
             gravity_accel_axis=str(imu["gravity_accel_axis"]), gyro_axis=str(imu["gyro_axis"]),
             slope_accel_sign=int(imu.get("slope_accel_sign", 1)),
             gravity_accel_sign=int(imu.get("gravity_accel_sign", 1)),
-            gyro_sign=int(imu.get("gyro_sign", 1)), gyro_weight=float(imu.get("gyro_weight", 0.98)))
+            gyro_sign=int(imu.get("gyro_sign", 1)), gyro_weight=float(imu.get("gyro_weight", 0.98)),
+            pitch_zero_offset_deg=float(imu.get("pitch_zero_offset_deg", 0.0)))
         self.ball_estimator = BallStateEstimator(
             velocity_alpha=float(estimator.get("velocity_alpha", 0.35)),
             acceleration_alpha=float(estimator.get("acceleration_alpha", 0.20)),

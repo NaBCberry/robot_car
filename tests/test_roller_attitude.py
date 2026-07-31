@@ -21,6 +21,12 @@ class PitchEstimatorTests(unittest.TestCase):
         estimate = estimator.update(sample(1.1, gyro_y=655))
         self.assertAlmostEqual(estimate.pitch_deg, 1.0, places=3)
 
+    def test_subtracts_mechanical_zero_offset(self):
+        estimator = PitchEstimator(slope_accel_axis="z", gravity_accel_axis="y", gyro_axis="x",
+                                   gyro_weight=0.0, pitch_zero_offset_deg=-5.0)
+        estimate = estimator.update(ImuSample(1.0, 0, 0, 8192, -717, 0, 0, 0))
+        self.assertAlmostEqual(estimate.pitch_deg, 0.0, places=1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -63,6 +63,9 @@ cd /userdata/rdkstudio/projects/robot_car
 该命令会启动现有网页和视觉服务；只有 ICM42688 已被识别后，才会输出待发送的 CAN 帧。
 `monitor_icm42688.sh` 不启动视觉、CAN 或电机，用于确认静止噪声、安装轴和正负方向；让水管
 向预期正方向缓慢抬起时，`pitch_deg` 应单调增加，否则调整 `imu` 的轴或符号配置。
+当前安装中水管纵向为 IMU `z`、向上法线为 `y`、转轴为 `x`。在水管置于机械零点时记录
+`monitor_icm42688.sh` 显示的稳定 `pitch_deg`，将该数填入 `imu.pitch_zero_offset_deg`；之后显示和
+控制使用的角度即以机械零点为 `0°`。
 确认方向、角度范围和 Y42 报文后，再将配置的 `enabled` 改为 `true`，车轮悬空、急停有效时
 执行：
 
