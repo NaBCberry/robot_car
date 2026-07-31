@@ -39,7 +39,7 @@ vehicle:
     enabled: true
     device: /dev/spidev1.0
     count: 8
-    brightness: 0.01       # Minimum visible level; never exceed 1% from this controller.
+    brightness: 0.10       # Visible status level; never exceed 10% from this controller.
     refresh_hz: 8
   actions:
     # Requests are accepted from UART and TUI, then pass through the safety watchdogs.

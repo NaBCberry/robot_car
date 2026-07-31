@@ -336,7 +336,7 @@ cd /userdata/rdkstudio/projects/robot_car
 ## 八灯状态指示
 
 `config/vehicle.yaml` 的 `vehicle.status_led` 使用 SPI1 MOSI（40-pin 排针 Pin 19）驱动
-8 颗 WS2812。默认亮度为 `1%`，仅用于状态显示；若不需要，设置 `enabled: false`。
+8 颗 WS2812。默认亮度为 `10%`，仅用于状态显示；若不需要，设置 `enabled: false`。
 
 | 灯珠 | 状态 | 颜色/动画 |
 |---:|---|---|
