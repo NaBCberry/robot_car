@@ -76,6 +76,20 @@ class RollerControlTests(unittest.TestCase):
         command = controller.step(10, BallState(0, 0, 0, 0), 0, 0.1)
         self.assertEqual(command.target_motor_angle_deg, 80)
 
+    def test_vehicle_acceleration_feedforward_is_optional_and_limited(self):
+        common = dict(
+            position_pid=pid(100), velocity_pid=pid(2_000), angle_pid=pid(20),
+            slope_bias=LinearTable([[-100, 0], [100, 0]], name="slope_bias"),
+            motor_by_tube_angle=LinearTable([[-15, -150], [0, 0], [15, 150]], name="motor_curve"),
+            target_min_mm=-100, target_max_mm=100, tube_angle_min_deg=-15,
+            tube_angle_max_deg=15, motor_angle_min_deg=-120, motor_angle_max_deg=120,
+            feedforward_enabled=True, feedforward_gain=10.0, feedforward_limit_mm_s2=25.0,
+        )
+        controller = RollerController(**common)
+        command = controller.step(0, BallState(1000, 0, 0, 0), 0, 0.02,
+                                  vehicle_acceleration_mm_s2=100)
+        self.assertAlmostEqual(command.acceleration_command_mm_s2, 25.0)
+
 
 if __name__ == "__main__":
     unittest.main()

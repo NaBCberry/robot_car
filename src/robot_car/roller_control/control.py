@@ -144,13 +144,19 @@ class RollerController:
                  slope_bias: LinearTable, motor_by_tube_angle: LinearTable, *,
                  target_min_mm: float, target_max_mm: float, tube_angle_min_deg: float,
                  tube_angle_max_deg: float, motor_angle_min_deg: float,
-                 motor_angle_max_deg: float, tilt_sign: float = 1.0) -> None:
+                 motor_angle_max_deg: float, tilt_sign: float = 1.0,
+                 feedforward_enabled: bool = False, feedforward_gain: float = 0.0,
+                 feedforward_limit_mm_s2: float = 0.0) -> None:
         if target_min_mm >= target_max_mm or tube_angle_min_deg >= tube_angle_max_deg:
             raise ValueError("roller control limits are invalid")
         if motor_angle_min_deg >= motor_angle_max_deg:
             raise ValueError("motor soft limits are invalid")
         if tilt_sign not in {-1.0, 1.0}:
             raise ValueError("tilt_sign must be -1 or 1")
+        if (not math.isfinite(feedforward_gain)
+                or not math.isfinite(feedforward_limit_mm_s2)
+                or feedforward_gain < 0 or feedforward_limit_mm_s2 < 0):
+            raise ValueError("acceleration feedforward parameters are invalid")
         self.position_pid = position_pid
         self.velocity_pid = velocity_pid
         self.angle_pid = angle_pid
@@ -163,6 +169,9 @@ class RollerController:
         self.motor_angle_min_deg = motor_angle_min_deg
         self.motor_angle_max_deg = motor_angle_max_deg
         self.tilt_sign = tilt_sign
+        self.feedforward_enabled = bool(feedforward_enabled)
+        self.feedforward_gain = feedforward_gain
+        self.feedforward_limit_mm_s2 = feedforward_limit_mm_s2
 
     def reset(self) -> None:
         self.position_pid.reset()
@@ -170,13 +179,22 @@ class RollerController:
         self.angle_pid.reset()
 
     def step(self, target_mm: float, ball: BallState, tube_angle_deg: float,
-             elapsed_s: float, *, target_acceleration_mm_s2: float = 0.0) -> RollerCommand:
+             elapsed_s: float, *, target_acceleration_mm_s2: float = 0.0,
+             vehicle_acceleration_mm_s2: float = 0.0) -> RollerCommand:
         if not self.target_min_mm <= target_mm <= self.target_max_mm:
             raise ValueError("target_mm is outside the calibrated tube range")
         position_error = target_mm - ball.position_mm
         velocity_reference = self.position_pid.update(position_error, elapsed_s)
+        if not math.isfinite(vehicle_acceleration_mm_s2):
+            raise ValueError("vehicle acceleration must be finite")
+        feedforward = target_acceleration_mm_s2
+        if self.feedforward_enabled:
+            feedforward += self.feedforward_gain * vehicle_acceleration_mm_s2
+            if self.feedforward_limit_mm_s2 > 0:
+                feedforward = max(-self.feedforward_limit_mm_s2,
+                                  min(self.feedforward_limit_mm_s2, feedforward))
         acceleration = self.velocity_pid.update(
-            velocity_reference - ball.velocity_mm_s, elapsed_s, target_acceleration_mm_s2)
+            velocity_reference - ball.velocity_mm_s, elapsed_s, feedforward)
         ratio = max(-0.20, min(0.20, acceleration / 9_806.65))
         dynamic_tilt = self.tilt_sign * math.degrees(math.asin(ratio))
         desired_tube_angle = self.slope_bias.at(ball.position_mm) + dynamic_tilt

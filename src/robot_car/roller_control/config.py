@@ -37,6 +37,9 @@ def build_controller(config: dict[str, Any]) -> RollerController:
         motor_angle_min_deg=float(motor["soft_limit_min_deg"]),
         motor_angle_max_deg=float(motor["soft_limit_max_deg"]),
         tilt_sign=float(control.get("tilt_sign", 1)),
+        feedforward_enabled=bool(control.get("feedforward", {}).get("enabled", False)),
+        feedforward_gain=float(control.get("feedforward", {}).get("gain", 0.0)),
+        feedforward_limit_mm_s2=float(control.get("feedforward", {}).get("limit_mm_s2", 0.0)),
     )
 
 
