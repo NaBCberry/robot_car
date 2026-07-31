@@ -47,7 +47,7 @@ class Icm42688Tests(unittest.TestCase):
         sensor = Icm42688(1, 1, spi_factory=lambda: fake)
         sensor.open()
         sensor.configure()
-        self.assertEqual(fake.writes, [[GYRO_CONFIG0, 0x06], [ACCEL_CONFIG0, 0x06],
+        self.assertEqual(fake.writes, [[GYRO_CONFIG0, 0x46], [ACCEL_CONFIG0, 0x46],
                                        [PWR_MGMT0, 0x0F]])
 
     def test_rejects_missing_sensor(self):

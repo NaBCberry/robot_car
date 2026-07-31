@@ -76,10 +76,10 @@ class Icm42688:
         self.spi = spi
 
     def configure(self) -> None:
-        """Enable accel and gyro in low-noise mode using their reset ranges."""
+        """Enable accel and gyro in low-noise mode at 1 kHz."""
         spi = self._require_spi()
-        self.write_register(GYRO_CONFIG0, 0x06, spi)
-        self.write_register(ACCEL_CONFIG0, 0x06, spi)
+        self.write_register(GYRO_CONFIG0, 0x46, spi)
+        self.write_register(ACCEL_CONFIG0, 0x46, spi)
         self.write_register(PWR_MGMT0, 0x0F, spi)
 
     def sample(self) -> ImuSample:

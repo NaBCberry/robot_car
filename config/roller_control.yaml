@@ -1,0 +1,48 @@
+# Separate direct-CAN chain.  Existing UART BALANCE_ROLLER output is unaffected.
+# Keep false until the SPI sensor, motor direction, limits, and both calibration tables are verified.
+enabled: false
+target_mm: 0
+state_timeout_ms: 120
+
+imu:
+  spi_bus: 1
+  chip_select: 0
+  speed_hz: 1000000
+  mode: 0
+  # Replace with the axes/signs measured after mounting on the moving pipe.
+  slope_accel_axis: x
+  gravity_accel_axis: z
+  gyro_axis: y
+  slope_accel_sign: 1
+  gravity_accel_sign: 1
+  gyro_sign: 1
+  gyro_weight: 0.98
+
+motor:
+  can_interface: can0
+  address: 1
+  packet_gap_ms: 3
+  command_hz: 40
+  speed_rpm: 20
+  acceleration_rpm_s: 100
+  deceleration_rpm_s: 100
+
+estimator:
+  velocity_alpha: 0.35
+  acceleration_alpha: 0.20
+  max_gap_ms: 250
+
+control:
+  tilt_sign: 1
+  limits:
+    target_min_mm: -115
+    target_max_mm: 115
+    tube_angle_min_deg: -8
+    tube_angle_max_deg: 8
+  position_pid: {kp: 1.0, ki: 0.0, kd: 0.0, output_limit: 80.0, integral_limit: 80.0}
+  velocity_pid: {kp: 12.0, ki: 0.0, kd: 0.0, output_limit: 1200.0, integral_limit: 200.0}
+  angle_pid: {kp: 3.0, ki: 0.0, kd: 0.0, output_limit: 20.0, integral_limit: 10.0}
+  # Measured static angle needed to hold the ball at each position. Replace zeros after calibration.
+  slope_bias_deg_by_position: [[-115, 0], [0, 0], [115, 0]]
+  # Measured crank inverse map: pipe angle (deg) -> Y42 absolute motor angle (deg).
+  motor_deg_by_tube_angle: [[-8, -80], [0, 0], [8, 80]]
