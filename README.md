@@ -44,6 +44,7 @@ robot_car/
 │   ├── run_steelball_uart.sh           # 相机识别最下方钢球并向 UART 输出极坐标的联调入口
 │   ├── run_roller_balance_uart.sh      # 顶置滚珠位置偏差的安全 UART 输出入口
 │   ├── run_roller_balance_can.sh       # 独立的 ICM42688/Y42 直接 CAN 控制入口，默认不使能
+│   ├── probe_icm42688.sh                # 只读探测 SPI 片选上的 ICM42688 身份寄存器
 │   ├── run_vehicled.sh                # 设置工作目录/PYTHONPATH 后启动 vehicled
 │   └── run_visiond.sh                 # 设置工作目录/PYTHONPATH 后启动 visiond
 ├── src/

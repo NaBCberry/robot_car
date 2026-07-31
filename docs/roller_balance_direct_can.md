@@ -39,7 +39,7 @@ flowchart LR
 
 ## ICM42688 接线确认
 
-当前目标是 `spi1.0`，ICM42688 的 SPI 模式为 0。传感器必须装在会随摆杆转动的部件上，
+若模块接在 SPI1 的 `CSN1`，当前目标就是 `spi1.1`；ICM42688 的 SPI 模式为 0。传感器必须装在会随摆杆转动的部件上，
 否则只能测到车架姿态，不能闭合摆杆角度环。
 
 正常探测时，读取寄存器 `0x75` 的结果是 `0x47`。当前现场探测的 `spi1.0` 和 `spi1.1`
@@ -55,6 +55,7 @@ flowchart LR
 
 ```bash
 cd /userdata/rdkstudio/projects/robot_car
+./scripts/probe_icm42688.sh 1
 ./scripts/run_roller_balance_can.sh --dry-run
 ```
 

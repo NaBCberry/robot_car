@@ -6,7 +6,7 @@ state_timeout_ms: 120
 
 imu:
   spi_bus: 1
-  chip_select: 0
+  chip_select: 1
   speed_hz: 1000000
   mode: 0
   # Replace with the axes/signs measured after mounting on the moving pipe.
