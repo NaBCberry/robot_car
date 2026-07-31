@@ -100,7 +100,15 @@ class VehicleDaemon:
                                 action_snapshot["phase"], action_snapshot["reason"])
                 if action_token != self._last_action_report:
                     try:
-                        self.gateway.send_event("ACTION_STATUS", action_snapshot, 1000,
+                        # Keep the wire event below the protocol's 255-byte
+                        # payload limit.  Timestamps and elapsed time remain
+                        # available in the local TUI and are not needed by M0.
+                        wire_action_status = {
+                            key: action_snapshot[key] for key in (
+                                "action_id", "status", "source", "phase", "target_mm",
+                                "last_remote_action_id", "ball_error_mm", "reason")
+                        }
+                        self.gateway.send_event("ACTION_STATUS", wire_action_status, 1000,
                                                 expect_ack=False)
                         self._last_action_report = action_token
                     except Exception:
