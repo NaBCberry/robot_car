@@ -1,11 +1,11 @@
 import unittest
 
-from robot_car.roller_control.icm42688 import (ACCEL_CONFIG, ACCEL_RANGE, GYRO_CONFIG,
-                                                GYRO_RANGE, PWR_CTRL, Icm42688, WHO_AM_I)
+from robot_car.roller_control.icm42688 import (ACCEL_CONFIG0, ACCEL_DATA_X1,
+                                                GYRO_CONFIG0, PWR_MGMT0, Icm42688, WHO_AM_I)
 
 
 class FakeSpi:
-    def __init__(self, identity=0x6A, sample=None):
+    def __init__(self, identity=0x47, sample=None):
         self.identity = identity
         self.sample = sample or [0] * 12
         self.max_speed_hz = 0
@@ -21,9 +21,9 @@ class FakeSpi:
         self.closed = True
 
     def xfer2(self, values):
-        if values == [(WHO_AM_I << 1) | 1, 0]:
+        if values == [WHO_AM_I | 0x80, 0]:
             return [0, self.identity]
-        if values == [(0x0C << 1) | 1] + [0] * 12:
+        if values == [ACCEL_DATA_X1 | 0x80] + [0] * 12:
             return [0] + self.sample
         self.writes.append(values)
         return [0] * len(values)
@@ -47,9 +47,8 @@ class Icm42688Tests(unittest.TestCase):
         sensor = Icm42688(1, 1, spi_factory=lambda: fake)
         sensor.open()
         sensor.configure()
-        self.assertEqual(fake.writes, [[PWR_CTRL << 1, 0x0E], [ACCEL_RANGE << 1, 0x01],
-                                       [GYRO_RANGE << 1, 0x02], [ACCEL_CONFIG << 1, 0xA8],
-                                       [GYRO_CONFIG << 1, 0xA8]])
+        self.assertEqual(fake.writes, [[PWR_MGMT0, 0x0F], [ACCEL_CONFIG0, 0x48],
+                                       [GYRO_CONFIG0, 0x48]])
 
     def test_rejects_missing_sensor(self):
         fake = FakeSpi(identity=0)

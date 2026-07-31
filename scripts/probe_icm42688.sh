@@ -24,7 +24,7 @@ except RuntimeError as error:
     print(error)
     raise SystemExit(2)
 else:
-    print(f"ICM42688 detected on spi1.{chip_select}: WHO_AM_I=0x6A")
+    print(f"ICM42688-P detected on spi1.{chip_select}: WHO_AM_I=0x47")
 finally:
     sensor.close()
 PY

@@ -8,14 +8,14 @@ import time
 from typing import Callable, Protocol
 
 
-WHO_AM_I = 0x01
-WHO_AM_I_ICM42688 = 0x6A
-PWR_CTRL = 0x7D
-GYRO_CONFIG = 0x42
-ACCEL_CONFIG = 0x40
-GYRO_RANGE = 0x43
-ACCEL_RANGE = 0x41
-ACC_XH = 0x0C
+# ICM-42688-P register bank 0.  The register values and SPI addressing below
+# follow DS-000347, rather than the incompatible HXY device manual.
+WHO_AM_I = 0x75
+WHO_AM_I_ICM42688 = 0x47
+PWR_MGMT0 = 0x4E
+GYRO_CONFIG0 = 0x4F
+ACCEL_CONFIG0 = 0x50
+ACCEL_DATA_X1 = 0x1F
 
 
 class SpiDevice(Protocol):
@@ -73,23 +73,21 @@ class Icm42688:
         if identity != WHO_AM_I_ICM42688:
             spi.close()
             raise RuntimeError(
-                "ICM42688 not found on spi%d.%d: WHO_AM_I=0x%02X (expected 0x6A)"
+                "ICM42688-P not found on spi%d.%d: WHO_AM_I=0x%02X (expected 0x47)"
                 % (self.bus, self.chip_select, identity))
         self.spi = spi
 
     def configure(self) -> None:
         """Enable ±4 g accel and ±500 dps gyro at 100 Hz."""
         spi = self._require_spi()
-        self.write_register(PWR_CTRL, 0x0E, spi)
+        self.write_register(PWR_MGMT0, 0x0F, spi)
         time.sleep(0.01)
-        self.write_register(ACCEL_RANGE, 0x01, spi)
-        self.write_register(GYRO_RANGE, 0x02, spi)
-        self.write_register(ACCEL_CONFIG, 0xA8, spi)
-        self.write_register(GYRO_CONFIG, 0xA8, spi)
+        self.write_register(ACCEL_CONFIG0, 0x48, spi)
+        self.write_register(GYRO_CONFIG0, 0x48, spi)
 
     def sample(self) -> ImuSample:
         spi = self._require_spi()
-        values = spi.xfer2([self._read_command(ACC_XH)] + [0] * 12)
+        values = spi.xfer2([self._read_command(ACCEL_DATA_X1)] + [0] * 12)
         if len(values) != 13:
             raise RuntimeError("ICM42688 returned an incomplete sample")
         decoded = struct.unpack(">hhhhhh", bytes(values[1:]))
@@ -108,13 +106,13 @@ class Icm42688:
             raise ValueError("ICM42688 register value must fit uint8")
         if not 0 <= address <= 0x7F:
             raise ValueError("ICM42688 register address must fit uint7")
-        spi.xfer2([address << 1, value])
+        spi.xfer2([address, value])
 
     @staticmethod
     def _read_command(address: int) -> int:
         if not 0 <= address <= 0x7F:
             raise ValueError("ICM42688 register address must fit uint7")
-        return (address << 1) | 1
+        return address | 0x80
 
     def close(self) -> None:
         if self.spi is not None:
