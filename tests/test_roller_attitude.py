@@ -27,6 +27,15 @@ class PitchEstimatorTests(unittest.TestCase):
         estimate = estimator.update(ImuSample(1.0, 0, 0, 8192, -717, 0, 0, 0))
         self.assertAlmostEqual(estimate.pitch_deg, 0.0, places=1)
 
+    def test_subtracts_gyro_bias(self):
+        estimator = PitchEstimator(slope_accel_axis="z", gravity_accel_axis="y", gyro_axis="x",
+                                   gyro_weight=1.0, gyro_bias_raw=100)
+        level = ImuSample(1.0, 0, 0, 8192, 0, 100, 0, 0)
+        estimate = estimator.update(level)
+        estimate = estimator.update(ImuSample(1.1, 0, 0, 8192, 0, 100, 0, 0))
+        self.assertEqual(estimate.pitch_rate_deg_s, 0.0)
+        self.assertEqual(estimate.pitch_deg, 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

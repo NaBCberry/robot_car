@@ -22,7 +22,7 @@ class PitchEstimator:
                  slope_accel_sign: int = 1, gravity_accel_sign: int = 1,
                  gyro_sign: int = 1, gyro_lsb_per_dps: float = 65.5,
                  accel_lsb_per_g: float = 8192.0, gyro_weight: float = 0.98,
-                 pitch_zero_offset_deg: float = 0.0) -> None:
+                 pitch_zero_offset_deg: float = 0.0, gyro_bias_raw: float = 0.0) -> None:
         self.slope_accel_axis = self._axis(slope_accel_axis)
         self.gravity_accel_axis = self._axis(gravity_accel_axis)
         self.gyro_axis = self._axis(gyro_axis)
@@ -34,8 +34,8 @@ class PitchEstimator:
             raise ValueError("gyro_sign must be -1 or 1")
         if gyro_lsb_per_dps <= 0 or accel_lsb_per_g <= 0 or not 0 <= gyro_weight <= 1:
             raise ValueError("pitch estimator parameters are invalid")
-        if not math.isfinite(pitch_zero_offset_deg):
-            raise ValueError("pitch_zero_offset_deg must be finite")
+        if not math.isfinite(pitch_zero_offset_deg) or not math.isfinite(gyro_bias_raw):
+            raise ValueError("IMU calibration offsets must be finite")
         self.slope_accel_sign = slope_accel_sign
         self.gravity_accel_sign = gravity_accel_sign
         self.gyro_sign = gyro_sign
@@ -43,6 +43,7 @@ class PitchEstimator:
         self.accel_lsb_per_g = accel_lsb_per_g
         self.gyro_weight = gyro_weight
         self.pitch_zero_offset_deg = pitch_zero_offset_deg
+        self.gyro_bias_raw = gyro_bias_raw
         self._estimate: PitchEstimate | None = None
 
     def reset(self) -> None:
@@ -50,7 +51,8 @@ class PitchEstimator:
 
     def update(self, sample: ImuSample) -> PitchEstimate:
         acceleration = self._acceleration_pitch(sample)
-        gyro_rate = self.gyro_sign * self._gyro(sample, self.gyro_axis) / self.gyro_lsb_per_dps
+        gyro_rate = self.gyro_sign * (self._gyro(sample, self.gyro_axis) - self.gyro_bias_raw)
+        gyro_rate /= self.gyro_lsb_per_dps
         previous = self._estimate
         if previous is None or sample.timestamp_s <= previous.timestamp_s:
             self._estimate = PitchEstimate(sample.timestamp_s, acceleration, gyro_rate)
@@ -62,9 +64,12 @@ class PitchEstimator:
         return self._estimate
 
     def _acceleration_pitch(self, sample: ImuSample) -> float:
+        return self.raw_acceleration_pitch_deg(sample) - self.pitch_zero_offset_deg
+
+    def raw_acceleration_pitch_deg(self, sample: ImuSample) -> float:
         slope = self.slope_accel_sign * self._accel(sample, self.slope_accel_axis)
         gravity = self.gravity_accel_sign * self._accel(sample, self.gravity_accel_axis)
-        return math.degrees(math.atan2(slope, gravity)) - self.pitch_zero_offset_deg
+        return math.degrees(math.atan2(slope, gravity))
 
     @staticmethod
     def _axis(value: str) -> str:
