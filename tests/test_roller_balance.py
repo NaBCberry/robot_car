@@ -33,6 +33,14 @@ class RollerBalanceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "calibration is incomplete"):
             adapter.initialize()
 
+    def test_adapter_interpolates_between_scale_ticks_and_clamps_endpoints(self):
+        adapter = RollerBalanceAdapter("roller", {"config": {}})
+        adapter.axis_points = ((100.0, -120.0), (300.0, 0.0), (700.0, 120.0))
+        self.assertEqual(adapter._position_mm(200.0), -60.0)
+        self.assertEqual(adapter._position_mm(500.0), 60.0)
+        self.assertEqual(adapter._position_mm(50.0), -120.0)
+        self.assertEqual(adapter._position_mm(800.0), 120.0)
+
 
 if __name__ == "__main__":
     unittest.main()

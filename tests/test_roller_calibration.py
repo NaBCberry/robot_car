@@ -40,6 +40,48 @@ class RollerCalibrationTests(unittest.TestCase):
                 "tube_length_mm": 250,
             })
 
+    def test_saves_all_physical_scale_ticks(self):
+        axis_points = [
+            {"position_mm": position_mm, "pixel_x": 110 + index * 20}
+            for index, position_mm in enumerate(range(-120, 121, 10))
+        ]
+        value = build_roller_calibration({
+            "roi_xyxy": [100, 40, 600, 180],
+            "center_x_px": 350,
+            "tube_length_mm": 250,
+            "axis_points": axis_points,
+        })
+        self.assertEqual(value["axis_points"][0], {"position_mm": -120, "pixel_x": 110.0})
+        self.assertEqual(value["axis_points"][-1], {"position_mm": 120, "pixel_x": 590.0})
+
+    def test_rejects_missing_or_unordered_scale_ticks(self):
+        axis_points = [
+            {"position_mm": position_mm, "pixel_x": 110 + index * 20}
+            for index, position_mm in enumerate(range(-120, 121, 10))
+        ]
+        axis_points.pop()
+        with self.assertRaisesRegex(ValueError, "every -120 to 120"):
+            build_roller_calibration({
+                "roi_xyxy": [100, 40, 600, 180],
+                "center_x_px": 350,
+                "tube_length_mm": 250,
+                "axis_points": axis_points,
+            })
+
+        unordered_points = [
+            {"position_mm": position_mm, "pixel_x": 110 + index * 20}
+            for index, position_mm in enumerate(range(-120, 121, 10))
+        ]
+        unordered_points[10]["pixel_x"], unordered_points[11]["pixel_x"] = (
+            unordered_points[11]["pixel_x"], unordered_points[10]["pixel_x"])
+        with self.assertRaisesRegex(ValueError, "ordered along the tube"):
+            build_roller_calibration({
+                "roi_xyxy": [100, 40, 600, 180],
+                "center_x_px": 350,
+                "tube_length_mm": 250,
+                "axis_points": unordered_points,
+            })
+
     def test_save_updates_only_the_roller_calibration_mapping(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "camera.yaml"

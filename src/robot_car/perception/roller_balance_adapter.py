@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from bisect import bisect_left
 from typing import Any, Dict, Optional, Tuple
 
 from robot_car.camera.frame import CameraFrame
@@ -20,6 +21,7 @@ class RollerBalanceAdapter(SteelballAdapter):
         self.center_x_px = 0.0
         self.mm_per_pixel = 0.0
         self.axis_direction = 1.0
+        self.axis_points: Tuple[Tuple[float, float], ...] = ()
 
     def initialize(self) -> None:
         options = self.config.get("config", {})
@@ -36,6 +38,8 @@ class RollerBalanceAdapter(SteelballAdapter):
             raise ValueError("roller-balance mm_per_pixel must be positive")
         if self.axis_direction not in {-1.0, 1.0}:
             raise ValueError("roller-balance axis_direction must be -1 or 1")
+        axis_points = options.get("axis_points")
+        self.axis_points = self._parse_axis_points(axis_points) if axis_points else ()
         super().initialize()
 
     @staticmethod
@@ -49,6 +53,54 @@ class RollerBalanceAdapter(SteelballAdapter):
         if not all(math.isfinite(item) for item in (x1, y1, x2, y2)) or x2 <= x1 or y2 <= y1:
             raise ValueError("roller-balance roi_xyxy is invalid")
         return x1, y1, x2, y2
+
+    def _parse_axis_points(self, value: Any) -> Tuple[Tuple[float, float], ...]:
+        """Return tick mappings ordered by pixel coordinate for interpolation."""
+        if not isinstance(value, (list, tuple)) or len(value) < 2:
+            raise ValueError("roller-balance axis_points must contain at least two ticks")
+        if self.roi is None:
+            raise RuntimeError("roller-balance ROI must be initialized before axis_points")
+        roi_x1, _, roi_x2, _ = self.roi
+        points = []
+        for point in value:
+            if not isinstance(point, dict):
+                raise ValueError("roller-balance axis_points entries must be mappings")
+            try:
+                pixel_x = float(point["pixel_x"])
+                position_mm = float(point["position_mm"])
+            except (KeyError, TypeError, ValueError) as error:
+                raise ValueError("roller-balance axis_points entries are invalid") from error
+            if not math.isfinite(pixel_x) or not math.isfinite(position_mm):
+                raise ValueError("roller-balance axis_points must be finite")
+            if not roi_x1 <= pixel_x <= roi_x2:
+                raise ValueError("roller-balance axis_points must lie within the ROI")
+            points.append((pixel_x, position_mm))
+
+        points.sort(key=lambda point: point[0])
+        pixel_steps = [points[index + 1][0] - points[index][0] for index in range(len(points) - 1)]
+        position_steps = [points[index + 1][1] - points[index][1]
+                          for index in range(len(points) - 1)]
+        if any(math.isclose(step, 0.0, abs_tol=1e-6) for step in pixel_steps):
+            raise ValueError("roller-balance axis_points pixel positions must not repeat")
+        if any(math.isclose(step, 0.0, abs_tol=1e-6) for step in position_steps):
+            raise ValueError("roller-balance axis_points positions must not repeat")
+        if not (all(step > 0 for step in position_steps) or all(step < 0 for step in position_steps)):
+            raise ValueError("roller-balance axis_points positions must be ordered along the tube")
+        return tuple(points)
+
+    def _position_mm(self, pixel_x: float) -> float:
+        """Map a ball center to millimetres using ticks, falling back to a fixed scale."""
+        if not self.axis_points:
+            return self.axis_direction * (pixel_x - self.center_x_px) * self.mm_per_pixel
+        if pixel_x <= self.axis_points[0][0]:
+            return self.axis_points[0][1]
+        if pixel_x >= self.axis_points[-1][0]:
+            return self.axis_points[-1][1]
+        upper_index = bisect_left(self.axis_points, (pixel_x, -math.inf))
+        lower_pixel, lower_position = self.axis_points[upper_index - 1]
+        upper_pixel, upper_position = self.axis_points[upper_index]
+        ratio = (pixel_x - lower_pixel) / (upper_pixel - lower_pixel)
+        return lower_position + ratio * (upper_position - lower_position)
 
     def _select_primary(self, boxes: Any, scores: Any, class_ids: Any) -> Optional[Tuple[Any, float, int]]:
         if self.roi is None:
@@ -72,8 +124,7 @@ class RollerBalanceAdapter(SteelballAdapter):
         x1, y1, x2, y2 = (float(value) for value in box)
         center_x = (x1 + x2) / 2.0
         center_y = (y1 + y2) / 2.0
-        error_mm = int(round(
-            self.axis_direction * (center_x - self.center_x_px) * self.mm_per_pixel))
+        error_mm = int(round(self._position_mm(center_x)))
         payload = {
             "stable_id": "roller_balance_ball",
             "class_id": class_id,
