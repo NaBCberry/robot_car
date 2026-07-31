@@ -75,6 +75,7 @@ class DebugServerTests(unittest.TestCase):
             self.assertIn("scaleMarks", calibration_page)
             self.assertIn("index*10-120", calibration_page)
             self.assertIn("cursor-guide", calibration_page)
+            self.assertIn("zeroPoint", calibration_page)
 
         request = Request(
             f"{self.base_url}/api/roller_balance/calibration",
