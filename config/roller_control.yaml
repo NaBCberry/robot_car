@@ -1,6 +1,6 @@
 # Separate direct-CAN chain.  Existing UART BALANCE_ROLLER output is unaffected.
 # Keep false until the SPI sensor, motor direction, limits, and both calibration tables are verified.
-enabled: false
+enabled: true
 target_mm: 0
 state_timeout_ms: 120
 
@@ -29,14 +29,19 @@ imu:
 motor:
   can_interface: can0
   address: 1
+  # Verified by read-options (1A): EMM closed-loop firmware.
+  firmware: emm
+  # Full configuration (42) reports Microstep=0x10: 1.8° motor × 16 = 3200 pulses/revolution.
+  pulses_per_revolution: 3200
   packet_gap_ms: 3
   command_hz: 40
   speed_rpm: 20
   acceleration_rpm_s: 100
   deceleration_rpm_s: 100
-  # Provisional bounds match the current curve endpoints. Re-measure before arming.
-  soft_limit_min_deg: -619.400
-  soft_limit_max_deg: 897.000
+  # The prior measurements used X-firmware scaling and must not drive this EMM motor.
+  soft_limit_firmware: emm
+  soft_limit_min_deg: -29.113
+  soft_limit_max_deg: 43.571
   # Display-only ratio: raw Y42 multi-turn degrees / output-shaft degrees.
   position_deg_per_output_deg: 1.0
 

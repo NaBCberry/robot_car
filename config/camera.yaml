@@ -20,10 +20,10 @@ camera:
     - 1.0
     roller_balance:
       roi_xyxy:
-      - 23.21
-      - 297.79
-      - 1245.58
-      - 363.83
-      center_x_px: 640.4
-      mm_per_pixel: 0.204522
+      - 28.64
+      - 301.4
+      - 1240.18
+      - 360.23
+      center_x_px: 639.81
+      mm_per_pixel: 0.20635
       axis_direction: 1

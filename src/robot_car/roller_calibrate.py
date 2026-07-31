@@ -38,7 +38,8 @@ def invert_crank_samples(samples: Iterable[tuple[float, float]]) -> list[list[fl
 
 
 def update_config(path: Path, *, limits: tuple[float, float] | None = None,
-                  crank_map: list[list[float]] | None = None) -> None:
+                  crank_map: list[list[float]] | None = None,
+                  soft_limit_firmware: str | None = None) -> None:
     text = path.read_text(encoding="utf-8")
     replacements: dict[str, str] = {}
     if limits is not None:
@@ -46,6 +47,8 @@ def update_config(path: Path, *, limits: tuple[float, float] | None = None,
         replacements["soft_limit_max_deg"] = "%.3f" % limits[1]
     if crank_map is not None:
         replacements["motor_deg_by_tube_angle"] = repr(crank_map)
+    if soft_limit_firmware is not None:
+        replacements["soft_limit_firmware"] = soft_limit_firmware
     lines = []
     remaining = set(replacements)
     for line in text.splitlines(keepends=True):
@@ -66,8 +69,9 @@ def update_config(path: Path, *, limits: tuple[float, float] | None = None,
 
 def prompt_capture(label: str) -> None:
     print(f"\n{label}")
-    print("请勿顶到机械硬限位；保留安全余量后输入 CAPTURE 记录当前位置。")
-    if input("> ").strip().upper() != "CAPTURE":
+    print("1. 记录当前位置")
+    print("2. 取消")
+    if input("选择 [1/2]: ").strip() != "1":
         raise RuntimeError("calibration cancelled")
 
 
@@ -90,12 +94,32 @@ def countdown(seconds: int) -> None:
 
 def wait_for_position(actuator: Y42Actuator, target_deg: float, timeout_s: float = 30.0) -> float:
     deadline = time.monotonic() + timeout_s
+    last_position = None
     while time.monotonic() < deadline:
         position = actuator.read_position_deg(timeout_s=min(2.0, deadline - time.monotonic()))
+        last_position = position
         if abs(position - target_deg) <= 1.0:
             return position
         time.sleep(0.1)
-    raise RuntimeError("Y42 did not reach the requested position before timeout")
+    status = actuator.read_motor_status()
+    raise RuntimeError("Y42 did not reach %.3f°; last position %.3f°, status 0x%02X" % (
+        target_deg, last_position, status))
+
+
+def wait_for_absolute_home(actuator: Y42Actuator, timeout_s: float = 30.0) -> float:
+    deadline = time.monotonic() + timeout_s
+    saw_active = False
+    while time.monotonic() < deadline:
+        remaining = min(2.0, deadline - time.monotonic())
+        status = actuator.read_home_status(timeout_s=remaining)
+        if status & 0x08:
+            raise RuntimeError("Y42 absolute home failed (status 0x%02X)" % status)
+        saw_active = saw_active or bool(status & 0x04)
+        position = actuator.read_position_deg(timeout_s=remaining)
+        if not status & 0x04 and (saw_active or abs(position) <= 1.0):
+            return position
+        time.sleep(0.1)
+    raise RuntimeError("Y42 absolute home timed out")
 
 
 def build_pitch(config: dict) -> tuple[Icm42688, PitchEstimator]:
@@ -118,9 +142,11 @@ def build_pitch(config: dict) -> tuple[Icm42688, PitchEstimator]:
 def build_actuator(config: dict) -> Y42Actuator:
     motor = config["motor"]
     return Y42Actuator(interface=str(motor["can_interface"]), address=int(motor["address"]),
+                       firmware=str(motor.get("firmware", "x")),
                        packet_gap_ms=float(motor.get("packet_gap_ms", 3)),
                        soft_limit_min_deg=float(motor["soft_limit_min_deg"]),
-                       soft_limit_max_deg=float(motor["soft_limit_max_deg"]))
+                       soft_limit_max_deg=float(motor["soft_limit_max_deg"]),
+                       pulses_per_revolution=int(motor.get("pulses_per_revolution", 3200)))
 
 
 def average_tube_pitch(sensor: Icm42688, pitch: PitchEstimator, *, samples: int, hz: float) -> float:
@@ -136,6 +162,7 @@ def average_tube_pitch(sensor: Icm42688, pitch: PitchEstimator, *, samples: int,
 
 def calibrate_limits(args: argparse.Namespace, config: dict, path: Path) -> int:
     actuator = build_actuator(config)
+    keep_enabled = False
     actuator.open()
     try:
         actuator.disable()
@@ -148,34 +175,41 @@ def calibrate_limits(args: argparse.Namespace, config: dict, path: Path) -> int:
         print("\n建议写入（Y42 多圈控制坐标）：")
         print("  soft_limit_min_deg: %.3f" % limits[0])
         print("  soft_limit_max_deg: %.3f" % limits[1])
-        if getattr(args, "prompt_apply", False):
-            args.apply = input("写入软限位？输入 APPLY 确认: ").strip().upper() == "APPLY"
         if args.apply:
-            update_config(path, limits=limits)
+            update_config(path, limits=limits, soft_limit_firmware=actuator.firmware)
             print("已写入 %s" % path)
-        if input("曲轴轴是否已经锁紧？输入 LOCKED 继续: ").strip().upper() != "LOCKED":
+        print("1. 保持松轴")
+        print("2. 使能锁紧")
+        if input("选择 [1/2]: ").strip() != "2":
             return 0
-        if input("是否在 2 秒倒计时后回到 Y42 坐标零点？输入 HOME 确认: ").strip().upper() != "HOME":
+        actuator.soft_limit_min_deg, actuator.soft_limit_max_deg = limits
+        actuator.enable()
+        print("1. 不回零")
+        print("2. 2 秒后回零")
+        if input("选择 [1/2]: ").strip() != "2":
+            keep_enabled = True
+            print("已锁紧")
             return 0
         if not limits[0] <= 0 <= limits[1]:
-            raise RuntimeError("Y42 坐标零点不在刚采集的软限位内，拒绝回零")
-        actuator.soft_limit_min_deg, actuator.soft_limit_max_deg = limits
-        print("即将回到 Y42 坐标零点；请确认急停有效且手部已离开机构。")
+            raise RuntimeError("Y42 坐标零点不在刚采集的软限位内，拒绝回中")
+        print("2 秒后回零")
         countdown(2)
-        actuator.enable()
-        actuator.move_absolute(0.0, speed_rpm=5.0, acceleration_rpm_s=30,
-                               deceleration_rpm_s=30)
-        position = wait_for_position(actuator, 0.0)
-        print("已回到 Y42 坐标零点：%.3f°" % position)
+        actuator.home_absolute_zero()
+        position = wait_for_absolute_home(actuator)
+        keep_enabled = True
+        print("已回零：%.3f°" % position)
     finally:
-        actuator.close()
+        actuator.close(disable=not keep_enabled)
     return 0
 
 
 def calibrate_crank(args: argparse.Namespace, config: dict, path: Path) -> int:
-    if not args.arm or not bool(config.get("enabled", False)):
-        raise RuntimeError("自动曲轴标定要求 roller_control.yaml 的 enabled: true 且传入 --arm")
+    if not bool(config.get("enabled", False)):
+        raise RuntimeError("自动曲轴标定要求 roller_control.yaml 的 enabled: true")
     motor = config["motor"]
+    firmware = str(motor.get("firmware", "x"))
+    if str(motor.get("soft_limit_firmware", firmware)) != firmware:
+        raise RuntimeError("soft limits use another firmware unit; rerun limits and write the result first")
     lower = float(motor["soft_limit_min_deg"])
     upper = float(motor["soft_limit_max_deg"])
     targets = [lower + (upper - lower) * index / (args.points - 1)
@@ -187,17 +221,38 @@ def calibrate_crank(args: argparse.Namespace, config: dict, path: Path) -> int:
     try:
         sensor.configure()
         actuator.open()
-        actuator.enable()
+        actuator.enable(confirm=True)
+        motor_status = actuator.read_motor_status()
+        if not motor_status & 0x01:
+            raise RuntimeError("Y42 is not enabled (status 0x%02X)" % motor_status)
+        if motor_status & 0x08:
+            raise RuntimeError("Y42 stall protection is active (status 0x%02X)" % motor_status)
+        current = actuator.read_position_deg()
+        previous_target = actuator.read_target_position_deg() if actuator.firmware == "emm" else current
         for target in targets:
             print("移动至电机 %.3f°" % target)
-            actuator.move_absolute(target, speed_rpm=args.speed_rpm,
-                                  acceleration_rpm_s=args.acceleration_rpm_s,
-                                  deceleration_rpm_s=args.deceleration_rpm_s)
+            movement_timeout_s = max(5.0, abs(target - current) / (args.speed_rpm * 6.0) + 5.0)
+            if actuator.firmware == "emm":
+                actuator.move_relative_target(target - previous_target, speed_rpm=args.speed_rpm,
+                                             acceleration_rpm_s=args.acceleration_rpm_s,
+                                             deceleration_rpm_s=args.deceleration_rpm_s)
+                accepted_target = actuator.read_target_position_deg()
+                if abs(accepted_target - target) > 1.0:
+                    raise RuntimeError("Y42 did not accept %.3f°; target is %.3f°" % (
+                        target, accepted_target))
+                previous_target = accepted_target
+            else:
+                actuator.move_to_coordinate(target, current_angle_deg=current, speed_rpm=args.speed_rpm,
+                                            acceleration_rpm_s=args.acceleration_rpm_s,
+                                            deceleration_rpm_s=args.deceleration_rpm_s, confirm=True,
+                                            confirm_timeout_s=movement_timeout_s)
+            wait_for_position(actuator, target, timeout_s=movement_timeout_s)
             time.sleep(args.settle_s)
             actual = display_motor_position(actuator, config, "  采样")
             tube = average_tube_pitch(sensor, pitch, samples=args.samples, hz=args.sample_hz)
             measurements.append((actual, tube))
             print("  实际电机 %.3f°，水管 %.3f°" % (actual, tube))
+            current = actual
     finally:
         actuator.close()
         sensor.close()
@@ -218,7 +273,6 @@ def parse_args() -> argparse.Namespace:
     limits.add_argument("--margin-deg", type=float, default=2.0)
     limits.add_argument("--apply", action="store_true", help="write measured soft limits to the config")
     crank = subparsers.add_parser("map", help="move Y42 slowly and sample the tube angle")
-    crank.add_argument("--arm", action="store_true", help="allow real motor movement after config enablement")
     crank.add_argument("--points", type=int, default=7)
     crank.add_argument("--speed-rpm", type=float, default=5.0)
     crank.add_argument("--acceleration-rpm-s", type=int, default=30)
@@ -239,12 +293,16 @@ def choose_interactive_mode(args: argparse.Namespace) -> argparse.Namespace:
         args.mode = "limits"
         margin = input("每端安全余量（度）[2]: ").strip()
         args.margin_deg = float(margin or 2.0)
-        args.apply = False
-        args.prompt_apply = True
+        print("1. 不写入")
+        print("2. 写入软限位")
+        args.apply = input("选择 [1/2]: ").strip() == "2"
         return args
     if choice == "2":
         args.mode = "map"
-        args.arm = input("确认机构已锁紧、急停有效。输入 ARM 继续: ").strip().upper() == "ARM"
+        print("1. 取消")
+        print("2. 已锁紧且急停有效，继续")
+        if input("选择 [1/2]: ").strip() != "2":
+            raise SystemExit("已取消")
         points = input("采样点数 [7]: ").strip()
         args.points = int(points or 7)
         args.speed_rpm = 5.0
@@ -253,7 +311,9 @@ def choose_interactive_mode(args: argparse.Namespace) -> argparse.Namespace:
         args.settle_s = 2.0
         args.samples = 40
         args.sample_hz = 20.0
-        args.apply = input("采集完成后写入配置？输入 APPLY 确认: ").strip().upper() == "APPLY"
+        print("1. 不写入")
+        print("2. 写入标定表")
+        args.apply = input("选择 [1/2]: ").strip() == "2"
         return args
     raise SystemExit("请选择 1 或 2")
 
