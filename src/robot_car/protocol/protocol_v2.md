@@ -39,18 +39,102 @@ UART 帧以固定两字节帧头 `0xA5 0x5A` 开始，**没有帧尾，也不使
 
 ### `ACTION_REQUEST`（下位机 -> RDK）
 
-为保持 v2 兼容，下位机请求 RDK 执行赛题动作时使用 `CMD_EVENT`，其 UTF-8 JSON
-格式如下：
+`ACTION_REQUEST` 没有独立的 `message_type`，必须封装在 `CMD_EVENT (0x02)` 中。
+发送方向固定为 **MSPM0 -> RDK X5**，用于请求 RDK 执行一个赛题动作。它只表达
+“执行哪个动作及其参数”，不直接携带车轮速度、PWM 或电机角度。
+
+#### 1. 外层帧和 JSON 结构
+
+`CMD_EVENT.payload` 是 UTF-8 编码的 JSON 对象，结构固定如下：
 
 ```json
-{"event_type":"ACTION_REQUEST","payload":{"action_id":3,"request_id":128,
-"parameters":{"target_mm":50}},"valid_for_ms":1000}
+{
+  "event_type": "ACTION_REQUEST",
+  "payload": {
+    "action_id": 6,
+    "request_id": 128,
+    "parameters": {"target_mm": 35, "timeout_ms": 30000}
+  },
+  "valid_for_ms": 1000
+}
 ```
 
-`action_id` 和 `request_id` 均为无符号整数，分别占用 1 字节和 2 字节语义范围；
-`parameters` 必须是 JSON 对象。RDK 按协议帧 `sequence` 去重，第一次收到时放入动作
-队列并回复 `ACK status=0`，重复帧回复 `status=1` 且不得再次执行，字段非法时回复
-`status=2`。动作是否完成通过后续状态遥测或 `ACTION_STATUS` 事件报告。
+| JSON 路径 | 类型/范围 | 必填 | 说明 |
+|---|---|:---:|---|
+| `event_type` | 字符串，固定为 `ACTION_REQUEST` | 是 | 事件名称区分大小写，不能写成 `action_request` |
+| `payload` | JSON object | 是 | 请求主体，不能为数组、字符串或 `null` |
+| `payload.action_id` | 无符号整数 `0`-`255` | 是 | 赛题动作编号，见下表；协议层使用 u8 语义 |
+| `payload.request_id` | 无符号整数 `0`-`65535` | 是 | 下位机生成的请求标识，用于日志和业务关联；可循环使用 |
+| `payload.parameters` | JSON object | 是 | 动作参数；没有参数时发送 `{}`，不能省略或发送 `null` |
+| `valid_for_ms` | 无符号整数 `1`-`65535` | 是 | 请求期望有效期，单位 ms；RDK 当前校验范围并用于事件语义 |
+
+外层通用帧的 `sequence` 是 **RDK 去重依据**，与 JSON 内的 `request_id` 不同：
+
+- `sequence` 由发送方每发一帧递增，回绕范围为 `0`-`65535`；
+- `request_id` 由下位机的业务逻辑生成，只用于关联一次按键/任务请求；
+- 重发同一请求时必须保持相同的 `sequence`，这样 RDK 才会回复重复状态而不再次执行；
+- 如果使用新的 `sequence`，即使 `request_id` 相同，RDK 也会视为新的请求。
+
+JSON 必须使用紧凑 UTF-8 编码，整个 `CMD_EVENT.payload`（包括 JSON 标点）不得超过
+`255` 字节。禁止发送 `NaN`、`Infinity`、注释或额外的二进制尾部。
+
+#### 2. 动作编号和参数
+
+动作编号按试题编号定义，TUI 输入和 UART 请求使用相同数字：
+
+| `action_id` | 对应题目 | `parameters` | RDK 行为 |
+|---:|---:|---|---|
+| `0` | 停止 | `{}` | 立即停止当前动作并发送安全运动状态 |
+| `2` | 题2 | 可选 `timeout_ms`，默认 20000 | 顺时针巡线一圈并在 A 点结束 |
+| `3` | 题3 | 可选 `positive_mm`（默认 50）、`timeout_ms`（默认 5000） | 钢球从中心到正向位置，再回中心，最后到负向位置并稳定 |
+| `4` | 题4 | 可选 `timeout_ms`（默认 8000） | 巡线到 B；滚珠控制使用中心目标（`target_mm=0`） |
+| `5` | 题5 | 可选 `timeout_ms`（默认 30000） | 巡线一圈；滚珠控制使用中心目标（`target_mm=0`） |
+| `6` | 题6 | **`target_mm` 必填**；可选 `timeout_ms`（默认 30000） | 巡线一圈；滚珠保持启动时指定位置 |
+
+`target_mm` 和 `positive_mm` 的单位均为 mm，中心 O 为 `0`，正负方向必须与
+`camera.yaml` 和 MSPM0 的标定方向一致。`timeout_ms` 单位为 ms，必须为正整数。
+动作 4 和动作 5 在 RDK 侧都使用滚珠中心平衡规则，区别仅在于巡线路径和完成检查点；
+动作 6 才使用 `LINE_LAP_BALANCE_TARGET` 的指定位置规则。
+
+动作 6 的完整请求示例：
+
+```json
+{"event_type":"ACTION_REQUEST","payload":{"action_id":6,"request_id":128,
+"parameters":{"target_mm":35,"timeout_ms":30000}},"valid_for_ms":1000}
+```
+
+停止请求示例：
+
+```json
+{"event_type":"ACTION_REQUEST","payload":{"action_id":0,"request_id":129,
+"parameters":{}},"valid_for_ms":1000}
+```
+
+#### 3. RDK 接收和 ACK 时序
+
+下位机应按以下顺序实现：
+
+1. 发送带 `message_type=0x02` 的完整 v2 帧，并保存该帧的 `sequence`；
+2. RDK 先由帧解码器校验帧头、版本、长度和 CRC，再校验 JSON 类型和字段范围；
+3. RDK 根据 `sequence` 判断是否已经处理过；
+4. RDK 对该帧返回 `ACK (0x11)`，ACK payload 为
+   `acknowledged_sequence:u16`（大端）和 `status:u8`；
+5. 只有 `status=0` 的首次请求才进入动作队列并执行；重复请求不会再次执行；
+6. 动作开始、阶段变化、完成或失败通过 `ACTION_STATUS` 事件或 `TELEMETRY` 上报，
+   不使用 ACK 表示动作完成。
+
+ACK 状态定义：
+
+| `status` | 名称 | 含义 | 下位机处理 |
+|---:|---|---|---|
+| `0` | `ACCEPTED` | 帧合法，首次收到，已放入动作队列 | 不再重发；等待状态事件 |
+| `1` | `DUPLICATE` | `sequence` 已处理过 | 停止重试该序列，不重复执行 |
+| `2` | `INVALID` | 帧已完整接收，但 JSON 或字段校验失败 | 修正请求后使用新的 `sequence` 重发 |
+
+CRC、版本或帧长度错误的帧会被 RDK 丢弃并重新同步，通常不会产生 ACK。若在 ACK
+超时前未收到响应，下位机可以重发**相同 sequence 的同一帧**；不得为同一次重试
+随意修改 payload。RDK 的动作看门狗和急停逻辑仍然有效，收到 `ACCEPTED` 不代表
+车辆已经完成动作。
 
 ## `CMD_MOTION`
 
