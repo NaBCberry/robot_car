@@ -85,6 +85,7 @@ JSON 必须使用紧凑 UTF-8 编码，整个 `CMD_EVENT.payload`（包括 JSON 
 | `action_id` | 对应题目 | `parameters` | RDK 行为 |
 |---:|---:|---|---|
 | `0` | 停止 | `{}` | 立即停止当前动作并发送安全运动状态 |
+| `1` | 摆杆电机回零 | 可选 `timeout_ms`（默认 30000） | RDK 独占 CAN 控制 Y42 步进电机回到绝对坐标零点 |
 | `2` | 题2 | 可选 `timeout_ms`，默认 20000 | 顺时针巡线一圈并在 A 点结束 |
 | `3` | 题3 | 可选 `positive_mm`（默认 50）、`timeout_ms`（默认 5000） | 钢球从中心到正向位置，再回中心，最后到负向位置并稳定 |
 | `4` | 题4 | 可选 `timeout_ms`（默认 8000） | 巡线到 B；滚珠控制使用中心目标（`target_mm=0`） |
@@ -109,6 +110,32 @@ JSON 必须使用紧凑 UTF-8 编码，整个 `CMD_EVENT.payload`（包括 JSON 
 {"event_type":"ACTION_REQUEST","payload":{"action_id":0,"request_id":129,
 "parameters":{}},"valid_for_ms":1000}
 ```
+
+#### 2.1 摆杆步进电机回零（`action_id=1`）
+
+下位机需要让 RDK 控制摆杆步进电机回到机械绝对零点时，发送动作 `1`。下位机**不得**
+把 Y42 CAN 帧透传到 UART，也不得自行把当前位置写成零点；绝对零点由电机已有的参数
+固定定义。
+
+```json
+{"event_type":"ACTION_REQUEST","payload":{"action_id":1,"request_id":130,
+"parameters":{"timeout_ms":30000}},"valid_for_ms":1000}
+```
+
+RDK 接受该动作后的职责如下：
+
+1. 停止当前摆杆位置控制，确保 CAN 总线上的 Y42 只有一个控制者；
+2. 按 [`canstep/docs/protocol.md`](../../../../canstep/docs/protocol.md) 发送 Y42 回零命令
+   `A 9A 04 00 6B`，其中 `A` 是电机地址，`HomeMode=04` 表示“回到绝对位置坐标零点”，
+   `Sync=00`；
+3. 等待 Y42 对 `9A` 的接受响应以及完成响应 `9F`，必要时轮询 `3B` 回零状态；
+4. 成功时报告 `ACTION_STATUS.status="COMPLETE"`、`reason="motor_home_complete"`；
+   超时、拒绝或回零失败时报告 `status="FAILED"` 和对应原因，并停止后续摆杆动作。
+
+`ACK status=0` 仅表示 RDK 已收到并排队该请求，**不代表电机已经回零**。下位机必须以
+后续 `ACTION_STATUS` 为准；等待期间不得重复用新的 `sequence` 发送同一回零请求。若要
+中断尚未完成的回零，发送 `action_id=0`；RDK 应执行安全停止，并按 Y42 协议使用
+`A 9C 48 6B` 强制退出回零。
 
 #### 3. RDK 接收和 ACK 时序
 
