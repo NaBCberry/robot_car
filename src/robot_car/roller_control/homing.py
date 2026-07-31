@@ -16,7 +16,7 @@ class HomeCancelled(RuntimeError):
 
 
 def home_from_config_file(path: str | Path, timeout_ms: int,
-                          *, cancel_event: Event | None = None,
+                          *, hold_enabled: bool = True, cancel_event: Event | None = None,
                           actuator_factory: Callable[..., Y42Actuator] = Y42Actuator) -> float:
     """Home the configured Y42 to its stored absolute coordinate zero.
 
@@ -38,6 +38,7 @@ def home_from_config_file(path: str | Path, timeout_ms: int,
         soft_limit_max_deg=float(motor["soft_limit_max_deg"]),
     )
     deadline = time.monotonic() + int(timeout_ms) / 1000.0
+    completed = False
     actuator.open()
     try:
         actuator.enable()
@@ -53,10 +54,12 @@ def home_from_config_file(path: str | Path, timeout_ms: int,
             if status & 0x08:
                 raise RuntimeError("Y42 absolute home failed (status 0x%02X)" % status)
             if not status & 0x04:
-                return actuator.read_position_deg(timeout_s=min(2.0, remaining))
+                position = actuator.read_position_deg(timeout_s=min(2.0, remaining))
+                completed = True
+                return position
             time.sleep(0.05)
         raise RuntimeError("Y42 absolute home timed out")
     finally:
-        # A completed or failed one-shot home must not leave the mechanism
-        # energized until the dedicated roller controller takes ownership.
-        actuator.close()
+        # Preserve holding torque only after a verified successful home.  All
+        # failures and cancellation paths still stop and disable the motor.
+        actuator.close(disable=not (completed and hold_enabled))

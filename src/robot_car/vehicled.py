@@ -284,13 +284,15 @@ class VehicleDaemon:
                                            current_ball_error_mm=self.action_dispatcher.ball_error_mm)
             self._roller_home_cancel.clear()
             self._roller_home_thread = threading.Thread(
-                target=self._run_roller_home, args=(int(parameters["timeout_ms"]),),
+                target=self._run_roller_home,
+                args=(int(parameters["timeout_ms"]), bool(home_config.get("hold_enabled", True))),
                 name="roller-home", daemon=True)
             self._roller_home_thread.start()
 
-    def _run_roller_home(self, timeout_ms: int) -> None:
+    def _run_roller_home(self, timeout_ms: int, hold_enabled: bool) -> None:
         try:
             home_from_config_file(self.roller_control_path, timeout_ms,
+                                  hold_enabled=hold_enabled,
                                   cancel_event=self._roller_home_cancel)
         except HomeCancelled:
             LOG.info("roller motor home cancelled")

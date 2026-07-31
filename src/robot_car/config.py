@@ -39,7 +39,7 @@ SAFE_DEFAULTS: Dict[str, Any] = {
         },
         "balance": {"enabled": False, "output_only": False, "require_feedback": True,
                     "state_timeout_ms": 120},
-        "roller_home": {"enabled": False, "timeout_ms": 30000},
+        "roller_home": {"enabled": False, "timeout_ms": 30000, "hold_enabled": True},
         "status_led": {"enabled": False, "device": "/dev/spidev1.0", "count": 8,
                        "brightness": 0.10, "refresh_hz": 8},
         "actions": {"enabled": True, "default_timeout_ms": 30000},
@@ -162,6 +162,8 @@ def _validate_safe(config: Dict[str, Any]) -> None:
     roller_home = vehicle.get("roller_home", {})
     if not isinstance(roller_home.get("enabled", False), bool):
         raise ValueError("vehicle.roller_home.enabled must be a YAML boolean")
+    if not isinstance(roller_home.get("hold_enabled", True), bool):
+        raise ValueError("vehicle.roller_home.hold_enabled must be a YAML boolean")
     if not 0 < int(roller_home.get("timeout_ms", 0)) <= 0xFFFFFFFF:
         raise ValueError("vehicle.roller_home.timeout_ms must be positive")
     status_led = vehicle.get("status_led", {})

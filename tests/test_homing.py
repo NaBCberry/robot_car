@@ -34,8 +34,8 @@ class FakeActuator:
         self.calls.append("position")
         return 0.0
 
-    def close(self):
-        self.calls.append("close")
+    def close(self, *, disable=True):
+        self.calls.append("close:disable" if disable else "close:hold")
 
 
 class HomingTests(unittest.TestCase):
@@ -59,7 +59,7 @@ control: {}
     def test_completed_home_returns_verified_position_and_closes(self):
         self.assertEqual(home_from_config_file(self.path, 1000, actuator_factory=FakeActuator), 0.0)
         self.assertEqual(FakeActuator.instances[0].calls,
-                         ["open", "enable", "home", "status", "position", "close"])
+                         ["open", "enable", "home", "status", "position", "close:hold"])
 
     def test_cancelled_home_sends_y42_cancel_before_close(self):
         cancel = threading.Event()
@@ -68,7 +68,11 @@ control: {}
             home_from_config_file(self.path, 1000, cancel_event=cancel,
                                   actuator_factory=FakeActuator)
         self.assertEqual(FakeActuator.instances[0].calls,
-                         ["open", "enable", "home", "cancel", "close"])
+                         ["open", "enable", "home", "cancel", "close:disable"])
+
+    def test_successful_home_can_explicitly_release_holding_torque(self):
+        home_from_config_file(self.path, 1000, hold_enabled=False, actuator_factory=FakeActuator)
+        self.assertEqual(FakeActuator.instances[0].calls[-1], "close:disable")
 
 
 if __name__ == "__main__":
