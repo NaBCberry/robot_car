@@ -17,6 +17,7 @@ class HomeCancelled(RuntimeError):
 
 def home_from_config_file(path: str | Path, timeout_ms: int,
                           *, hold_enabled: bool = True, cancel_event: Event | None = None,
+                          show_tx: bool = False,
                           actuator_factory: Callable[..., Y42Actuator] = Y42Actuator) -> float:
     """Home the configured Y42 to its stored absolute coordinate zero.
 
@@ -36,6 +37,7 @@ def home_from_config_file(path: str | Path, timeout_ms: int,
         pulses_per_revolution=int(motor.get("pulses_per_revolution", 3200)),
         soft_limit_min_deg=float(motor["soft_limit_min_deg"]),
         soft_limit_max_deg=float(motor["soft_limit_max_deg"]),
+        show_tx=show_tx,
     )
     deadline = time.monotonic() + int(timeout_ms) / 1000.0
     completed = False

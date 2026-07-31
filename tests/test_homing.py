@@ -11,6 +11,7 @@ class FakeActuator:
 
     def __init__(self, **_kwargs):
         self.calls = []
+        self.kwargs = _kwargs
         self.status = 0
         type(self).instances.append(self)
 
@@ -73,6 +74,10 @@ control: {}
     def test_successful_home_can_explicitly_release_holding_torque(self):
         home_from_config_file(self.path, 1000, hold_enabled=False, actuator_factory=FakeActuator)
         self.assertEqual(FakeActuator.instances[0].calls[-1], "close:disable")
+
+    def test_home_is_quiet_by_default_for_tui_callers(self):
+        home_from_config_file(self.path, 1000, actuator_factory=FakeActuator)
+        self.assertFalse(FakeActuator.instances[0].kwargs["show_tx"])
 
 
 if __name__ == "__main__":
