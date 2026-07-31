@@ -172,7 +172,7 @@ def calibrate_crank(args: argparse.Namespace, config: dict, path: Path) -> int:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Roller Y42 soft-limit and crank calibration")
     parser.add_argument("--control-config", default="config/roller_control.yaml")
-    subparsers = parser.add_subparsers(dest="mode", required=True)
+    subparsers = parser.add_subparsers(dest="mode")
     limits = subparsers.add_parser("limits", help="manually capture Y42 safe travel with the shaft loose")
     limits.add_argument("--margin-deg", type=float, default=2.0)
     limits.add_argument("--apply", action="store_true", help="write measured soft limits to the config")
@@ -189,8 +189,37 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def choose_interactive_mode(args: argparse.Namespace) -> argparse.Namespace:
+    print("滚珠机构标定")
+    print("1. 松轴后手动采集电机软限位（不驱动电机）")
+    print("2. 锁紧曲轴后自动采集电机角度与水管倾角关系（会驱动电机）")
+    choice = input("选择 [1/2]: ").strip()
+    if choice == "1":
+        args.mode = "limits"
+        margin = input("每端安全余量（度）[2]: ").strip()
+        args.margin_deg = float(margin or 2.0)
+        args.apply = input("采集完成后写入配置？输入 APPLY 确认: ").strip().upper() == "APPLY"
+        return args
+    if choice == "2":
+        args.mode = "map"
+        args.arm = input("确认机构已锁紧、急停有效。输入 ARM 继续: ").strip().upper() == "ARM"
+        points = input("采样点数 [7]: ").strip()
+        args.points = int(points or 7)
+        args.speed_rpm = 5.0
+        args.acceleration_rpm_s = 30
+        args.deceleration_rpm_s = 30
+        args.settle_s = 2.0
+        args.samples = 40
+        args.sample_hz = 20.0
+        args.apply = input("采集完成后写入配置？输入 APPLY 确认: ").strip().upper() == "APPLY"
+        return args
+    raise SystemExit("请选择 1 或 2")
+
+
 def main() -> int:
     args = parse_args()
+    if args.mode is None:
+        args = choose_interactive_mode(args)
     if args.mode == "map" and (args.points < 3 or args.speed_rpm <= 0 or args.acceleration_rpm_s < 0
                                 or args.deceleration_rpm_s < 0 or args.settle_s < 0
                                 or args.samples <= 0 or args.sample_hz <= 0):
