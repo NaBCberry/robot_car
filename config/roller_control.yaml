@@ -2,7 +2,9 @@
 # Keep false until the I2C sensor, motor direction, limits, and both calibration tables are verified.
 enabled: true
 target_mm: 0
-state_timeout_ms: 120
+# Vision events can occasionally span more than one inference interval; do not stop the
+# motor for a single delayed frame while keeping loss-of-vision protection bounded.
+state_timeout_ms: 300
 
 imu:
   transport: i2c
@@ -60,11 +62,11 @@ control:
     tube_angle_min_deg: -8
     tube_angle_max_deg: 8
   # Lower outer-loop gain to avoid commanding the full tube angle before the motor catches up.
-  position_pid: {kp: 1.5, ki: 0.0, kd: 0.0, output_limit: 80.0, integral_limit: 80.0}
+  position_pid: {kp: 2.0, ki: 0.10, kd: 0.0, output_limit: 55.0, integral_limit: 20.0}
   # Limit requested acceleration while characterizing the motor/pipe delay.
   velocity_pid: {kp: 6.0, ki: 0.0, kd: 0.0, output_limit: 600.0, integral_limit: 200.0}
   # Angle feedback is deliberately limited while the motor response is being characterized.
-  angle_pid: {kp: 1.0, ki: 0.0, kd: 0.0, output_limit: 5.0, integral_limit: 10.0}
+  angle_pid: {kp: 0.4, ki: 0.0, kd: 0.0, output_limit: 3.0, integral_limit: 10.0}
   # Measured static angle needed to hold the ball at each position. Replace zeros after calibration.
   slope_bias_deg_by_position: [[-115, 0], [0, 0], [115, 0]]
   # Measured crank inverse map: pipe angle (deg) -> Y42 absolute motor angle (deg).
