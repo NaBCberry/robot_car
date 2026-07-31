@@ -16,7 +16,7 @@ from robot_car.camera.frame import CameraFrame
 from .events import VisionEvent
 from .plugin import VisionPlugin
 from .steelball_geometry import ImageToCaptureProjector
-from .yolo_adapter import RUNTIME_DIR
+from .yolo_adapter import PROJECTS_ROOT, RUNTIME_DIR
 
 
 class SteelballAdapter(VisionPlugin):
@@ -41,8 +41,11 @@ class SteelballAdapter(VisionPlugin):
         calibration = self._load_calibration(options)
         if calibration:
             self.projector = ImageToCaptureProjector(calibration)
-        if str(RUNTIME_DIR) not in sys.path:
-            sys.path.insert(0, str(RUNTIME_DIR))
+        # The reusable YOLO26 runtime imports ``utils.py_utils`` from the
+        # projects root.  Use absolute paths so TUI/visiond work from any cwd.
+        for import_root in (PROJECTS_ROOT, RUNTIME_DIR):
+            if str(import_root) not in sys.path:
+                sys.path.insert(0, str(import_root))
         module = importlib.import_module(f"yolo26_{model_type}")
         # The reusable runtime reports three timing lines for every frame.  At camera rate
         # that console I/O is unnecessary overhead; warnings and errors remain visible.

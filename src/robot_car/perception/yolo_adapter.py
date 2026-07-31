@@ -29,8 +29,12 @@ class YoloAdapter(VisionPlugin):
         model_path = Path(self.config.get("config", {}).get("model_path", ""))
         if not str(model_path) or not model_path.is_file():
             raise FileNotFoundError(f"YOLO model is not configured or missing: {model_path}")
-        if str(RUNTIME_DIR) not in sys.path:
-            sys.path.insert(0, str(RUNTIME_DIR))
+        # yolo26_*.py imports shared helpers as ``utils.py_utils``.  Those
+        # helpers live beside the repositories under the projects root; add
+        # both absolute roots so imports do not depend on the launch cwd.
+        for import_root in (PROJECTS_ROOT, RUNTIME_DIR):
+            if str(import_root) not in sys.path:
+                sys.path.insert(0, str(import_root))
         module = importlib.import_module("yolo26_det")
         options = self.config.get("config", {})
         model_config = module.YOLO26Config(
