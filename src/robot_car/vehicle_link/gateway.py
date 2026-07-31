@@ -107,9 +107,11 @@ class VehicleGateway:
             payload = pack_motion(safe_target.mode, safe_target.enabled, safe_target.valid_for_ms)
         return self._send(MessageType.CMD_MOTION, payload, expect_ack=True)
 
-    def send_event(self, event_type: str, payload: Dict[str, Any], valid_for_ms: int) -> int:
+    def send_event(self, event_type: str, payload: Dict[str, Any], valid_for_ms: int,
+                   *, expect_ack: bool = True) -> int:
         return self._send(MessageType.CMD_EVENT, pack_json({"event_type": event_type,
-                          "payload": payload, "valid_for_ms": valid_for_ms}), expect_ack=True)
+                          "payload": payload, "valid_for_ms": valid_for_ms}),
+                          expect_ack=expect_ack)
 
     def receive_action_request(self, timeout: float = 0.0) -> Optional[Dict[str, Any]]:
         """Return the next validated, de-duplicated remote action request."""

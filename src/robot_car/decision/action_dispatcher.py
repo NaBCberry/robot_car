@@ -30,6 +30,7 @@ class ActionSnapshot:
     elapsed_ms: int
     target_mm: Optional[float]
     last_remote_action_id: Optional[int]
+    last_action_id: Optional[int]
     ball_error_mm: Optional[float]
     reason: str
 
@@ -43,6 +44,7 @@ class ActionSnapshot:
             "elapsed_ms": self.elapsed_ms,
             "target_mm": self.target_mm,
             "last_remote_action_id": self.last_remote_action_id,
+            "last_action_id": self.last_action_id,
             "ball_error_mm": self.ball_error_mm,
             "reason": self.reason,
         }
@@ -61,6 +63,7 @@ class ActionDispatcher:
         self.deadline_ms: Optional[int] = None
         self.target_mm: Optional[float] = None
         self.last_remote_action_id: Optional[int] = None
+        self.last_action_id: Optional[int] = None
         self.ball_error_mm: Optional[float] = None
         self.reason = ""
         self._phase_started_ms: Optional[int] = None
@@ -82,6 +85,7 @@ class ActionDispatcher:
             self.stop("requested", now)
             return
         self.active_action = action
+        self.last_action_id = int(action)
         self.status = "RUNNING"
         self.source = source
         self.started_ms = now
@@ -169,6 +173,20 @@ class ActionDispatcher:
         else:
             self._stable_since_ms = None
 
+    def handle_telemetry(self, telemetry: Dict[str, Any], now_ms: Optional[int] = None) -> None:
+        """Consume optional M0 checkpoint telemetry without coupling to CAN details."""
+        checkpoint = telemetry.get("checkpoint", telemetry.get("line_checkpoint"))
+        if not isinstance(checkpoint, str):
+            return
+        now = _now_ms() if now_ms is None else now_ms
+        checkpoint = checkpoint.upper()
+        if checkpoint in {"A", "LAP_COMPLETE"} and self.active_action in {
+                ActionId.LINE_LAP_TO_A, ActionId.LINE_LAP_BALANCE_CENTER,
+                ActionId.LINE_LAP_BALANCE_TARGET}:
+            self.complete("checkpoint_a", now)
+        elif checkpoint == "B" and self.active_action == ActionId.LINE_TO_B_BALANCE_CENTER:
+            self.complete("checkpoint_b", now)
+
     def complete(self, reason: str, now_ms: Optional[int] = None) -> None:
         now = _now_ms() if now_ms is None else now_ms
         self.status = "COMPLETE"
@@ -189,8 +207,8 @@ class ActionDispatcher:
         elapsed = 0 if self.started_ms is None else max(0, now - self.started_ms)
         return ActionSnapshot(None if self.active_action is None else int(self.active_action),
                               self.status, self.source, self.phase, self.started_ms, elapsed,
-                              self.target_mm, self.last_remote_action_id, self.ball_error_mm,
-                              self.reason)
+                              self.target_mm, self.last_remote_action_id, self.last_action_id,
+                              self.ball_error_mm, self.reason)
 
 
 def _now_ms() -> int:

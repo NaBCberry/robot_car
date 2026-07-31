@@ -51,6 +51,7 @@ class VehicleDaemon:
         self.action_dispatcher = ActionDispatcher(config["vehicle"])
         self.action_lock = threading.Lock()
         self.ui_error = ""
+        self._last_action_report = None
         self.subscriber = VisionEventSubscriber(config["runtime"]["vision_socket"])
         self.stop_event = threading.Event()
         self.is_fake = isinstance(transport, FakeTransport)
@@ -81,7 +82,7 @@ class VehicleDaemon:
                     try:
                         self.request_action(request["action_id"], request.get("parameters"),
                                             source="uart", now_ms=now_ms)
-                    except (KeyError, TypeError, ValueError) as error:
+                    except (KeyError, TypeError, ValueError, RuntimeError) as error:
                         LOG.warning("rejected action request: %s", error)
                 with self.action_lock:
                     self.action_dispatcher.update(now_ms)
@@ -90,6 +91,18 @@ class VehicleDaemon:
                 except Exception:
                     LOG.exception("vehicle receive error")
                 telemetry = self.gateway.telemetry.snapshot()["data"]
+                with self.action_lock:
+                    self.action_dispatcher.handle_telemetry(telemetry, now_ms)
+                    action_snapshot = self.action_dispatcher.snapshot(now_ms).to_dict()
+                action_token = (action_snapshot["action_id"], action_snapshot["status"],
+                                action_snapshot["phase"], action_snapshot["reason"])
+                if action_token != self._last_action_report:
+                    try:
+                        self.gateway.send_event("ACTION_STATUS", action_snapshot, 1000,
+                                                expect_ack=False)
+                        self._last_action_report = action_token
+                    except Exception:
+                        LOG.exception("failed to report action status")
                 capture = self.config["vehicle"].get("capture", {})
                 balance = self.config["vehicle"].get("balance", {})
                 # Output-only capture tests send coordinates to an analyzer with motors
