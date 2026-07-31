@@ -29,6 +29,31 @@ class FakeSpi:
         return [0] * len(values)
 
 
+class FakeI2c:
+    def __init__(self, identity=0x47, sample=None):
+        self.identity = identity
+        self.sample = sample or [0] * 12
+        self.opened = None
+        self.closed = False
+        self.writes = []
+
+    def open(self, bus, address):
+        self.opened = (bus, address)
+
+    def close(self):
+        self.closed = True
+
+    def read_register(self, address, length=1):
+        if address == WHO_AM_I:
+            return bytes((self.identity,))
+        if address == ACCEL_DATA_X1:
+            return bytes(self.sample)
+        return bytes(length)
+
+    def write_register(self, address, value):
+        self.writes.append((address, value))
+
+
 class Icm42688Tests(unittest.TestCase):
     def test_open_verifies_identity_and_reads_sample(self):
         fake = FakeSpi(sample=[0, 1, 0, 2, 0, 3, 255, 252, 0, 5, 255, 250])
@@ -55,6 +80,22 @@ class Icm42688Tests(unittest.TestCase):
         sensor = Icm42688(1, 0, spi_factory=lambda: fake)
         with self.assertRaisesRegex(RuntimeError, "WHO_AM_I=0x00"):
             sensor.open()
+        self.assertTrue(fake.closed)
+
+    def test_i2c_open_configures_and_reads_sample(self):
+        fake = FakeI2c(sample=[0, 1, 0, 2, 0, 3, 255, 252, 0, 5, 255, 250])
+        sensor = Icm42688(0, transport="i2c", i2c_address=0x68,
+                          i2c_factory=lambda: fake, monotonic=lambda: 8.5)
+        sensor.open()
+        sensor.configure()
+        sample = sensor.sample()
+        self.assertEqual(fake.opened, (0, 0x68))
+        self.assertEqual(sample.timestamp_s, 8.5)
+        self.assertEqual((sample.temperature_raw, sample.accel_z_raw, sample.gyro_y_raw),
+                         (0, 3, 5))
+        self.assertEqual(fake.writes, [(PWR_MGMT0, 0x0F), (ACCEL_CONFIG0, 0x48),
+                                       (GYRO_CONFIG0, 0x48)])
+        sensor.close()
         self.assertTrue(fake.closed)
 
 

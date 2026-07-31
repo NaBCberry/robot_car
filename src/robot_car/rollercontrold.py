@@ -15,7 +15,7 @@ from robot_car.observability.logging import configure_logging
 from robot_car.roller_control.attitude import PitchEstimator
 from robot_car.roller_control.config import build_controller, load_roller_control
 from robot_car.roller_control.control import BallState, BallStateEstimator
-from robot_car.roller_control.icm42688 import Icm42688
+from robot_car.roller_control.icm42688 import Icm42688, sensor_from_config
 from robot_car.roller_control.y42_actuator import Y42Actuator
 
 
@@ -33,9 +33,7 @@ class RollerControlDaemon:
         imu = control_config["imu"]
         motor = control_config["motor"]
         estimator = control_config["estimator"]
-        self.sensor = Icm42688(int(imu["spi_bus"]), int(imu["chip_select"]),
-                               speed_hz=int(imu.get("speed_hz", 1_000_000)),
-                               mode=int(imu.get("mode", 0)))
+        self.sensor = sensor_from_config(imu)
         self.pitch = PitchEstimator(
             slope_accel_axis=str(imu["slope_accel_axis"]),
             gravity_accel_axis=str(imu["gravity_accel_axis"]), gyro_axis=str(imu["gyro_axis"]),

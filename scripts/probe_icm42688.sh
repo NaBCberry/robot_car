@@ -1,30 +1,35 @@
 #!/usr/bin/env bash
-# Read only: verify an ICM42688 identity register on a SPI1 chip select.
+# Read only: verify an ICM42688 identity register using roller_control.yaml.
 set -euo pipefail
 
 project_root=/userdata/rdkstudio/projects/robot_car
-chip_select=${1:-1}
-
-if [[ ! "${chip_select}" =~ ^[01]$ ]]; then
-    echo "用法：$0 [0|1]" >&2
-    exit 2
+control_config=${1:-"${project_root}/config/roller_control.yaml"}
+if [[ "${control_config}" != /* ]]; then
+    control_config="${project_root}/${control_config}"
 fi
 
 PYTHONPATH=/userdata/rdkstudio/projects:"${project_root}/src" \
-    python3 - "${chip_select}" <<'PY'
+    python3 - "${control_config}" <<'PY'
 import sys
+from pathlib import Path
 
-from robot_car.roller_control.icm42688 import Icm42688
+from robot_car.roller_control.config import load_roller_control
+from robot_car.roller_control.icm42688 import sensor_from_config
 
-chip_select = int(sys.argv[1])
-sensor = Icm42688(1, chip_select, speed_hz=100_000, mode=3)
+config = load_roller_control(Path(sys.argv[1]))
+sensor = sensor_from_config(config["imu"])
 try:
     sensor.open()
-except RuntimeError as error:
+except (OSError, RuntimeError) as error:
     print(error)
     raise SystemExit(2)
 else:
-    print(f"ICM42688-P detected on spi1.{chip_select}: WHO_AM_I=0x47")
+    if sensor.transport == "i2c":
+        print("ICM42688-P detected on i2c-%d address 0x%02X: WHO_AM_I=0x47" %
+              (sensor.bus, sensor.i2c_address))
+    else:
+        print("ICM42688-P detected on spi%d.%d: WHO_AM_I=0x47" %
+              (sensor.bus, sensor.chip_select))
 finally:
     sensor.close()
 PY

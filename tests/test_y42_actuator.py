@@ -1,5 +1,6 @@
 import unittest
 
+from canstep.can_driver import frames_for
 from robot_car.roller_control.y42_actuator import Y42Actuator
 
 
@@ -138,6 +139,26 @@ class Y42ActuatorTests(unittest.TestCase):
 
         self.assertEqual((calls[0].command, calls[0].direction, calls[0].position, calls[0].mode),
                          ("position", "ccw", 320, "relative-target"))
+
+    def test_repeats_function_code_for_multiframe_emm_position(self):
+        sent = []
+        payload = bytes((0xFD, 0x01, 0x00, 0x05, 0x1E, 0x00, 0x00, 0x01,
+                         0x03, 0x00, 0x00, 0x6B))
+        actuator = Y42Actuator(
+            interface="can0", address=1, firmware="emm", pulses_per_revolution=3200,
+            driver_factory=lambda *_: FakeDriver("can0", False),
+            payload_builder=lambda arguments: (arguments.address, payload),
+            payload_sender=lambda *args: sent.append(args),
+        )
+
+        actuator.move_relative_target(1, speed_rpm=5, acceleration_rpm_s=30,
+                                      deceleration_rpm_s=30)
+
+        self.assertEqual(sent[0][-1], True)
+        self.assertEqual(frames_for(1, payload, repeat_code=sent[0][-1]), (
+            (0x100, payload[:8]),
+            (0x101, bytes((0xFD, 0x03, 0x00, 0x00, 0x6B))),
+        ))
 
     def test_emm_converts_position_reading_to_degrees(self):
         driver = ReadingDriver("can0", False, responses=[

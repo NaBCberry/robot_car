@@ -10,7 +10,7 @@ from typing import Iterable
 
 from robot_car.roller_control.attitude import PitchEstimator
 from robot_car.roller_control.config import load_roller_control
-from robot_car.roller_control.icm42688 import Icm42688
+from robot_car.roller_control.icm42688 import Icm42688, sensor_from_config
 from robot_car.roller_control.y42_actuator import Y42Actuator
 
 
@@ -30,10 +30,12 @@ def invert_crank_samples(samples: Iterable[tuple[float, float]]) -> list[list[fl
         raise ValueError("at least three finite crank samples are required")
     tube_deltas = [right[0] - left[0] for left, right in zip(points, points[1:])]
     motor_deltas = [right[1] - left[1] for left, right in zip(points, points[1:])]
+    samples_text = ", ".join("水管%.2f°/电机%.2f°" % (tube, motor)
+                             for tube, motor in points)
     if any(delta <= 0.1 for delta in tube_deltas):
-        raise ValueError("tube angle samples are not uniquely invertible")
+        raise ValueError("tube angle samples are not uniquely invertible: " + samples_text)
     if not (all(delta > 0 for delta in motor_deltas) or all(delta < 0 for delta in motor_deltas)):
-        raise ValueError("crank samples are not monotonic over the selected travel")
+        raise ValueError("crank samples are not monotonic over the selected travel: " + samples_text)
     return [[round(tube, 3), round(motor, 3)] for tube, motor in points]
 
 
@@ -92,6 +94,29 @@ def countdown(seconds: int) -> None:
         time.sleep(1)
 
 
+def finish_calibration(actuator: Y42Actuator, limits: tuple[float, float]) -> bool:
+    """Ask whether to leave the motor enabled and optionally return to absolute zero."""
+    print("1. 保持松轴")
+    print("2. 使能锁紧")
+    if input("选择 [1/2]: ").strip() != "2":
+        actuator.disable()
+        return False
+    actuator.enable()
+    print("1. 不回零")
+    print("2. 2 秒后回零")
+    if input("选择 [1/2]: ").strip() != "2":
+        print("已锁紧")
+        return True
+    if not limits[0] <= 0 <= limits[1]:
+        raise RuntimeError("Y42 坐标零点不在当前软限位内，拒绝回中")
+    print("2 秒后回零")
+    countdown(2)
+    actuator.home_absolute_zero()
+    position = wait_for_absolute_home(actuator)
+    print("已回零：%.3f°" % position)
+    return True
+
+
 def wait_for_position(actuator: Y42Actuator, target_deg: float, timeout_s: float = 30.0) -> float:
     deadline = time.monotonic() + timeout_s
     last_position = None
@@ -124,8 +149,7 @@ def wait_for_absolute_home(actuator: Y42Actuator, timeout_s: float = 30.0) -> fl
 
 def build_pitch(config: dict) -> tuple[Icm42688, PitchEstimator]:
     imu = config["imu"]
-    sensor = Icm42688(int(imu["spi_bus"]), int(imu["chip_select"]),
-                      speed_hz=int(imu.get("speed_hz", 1_000_000)), mode=int(imu.get("mode", 3)))
+    sensor = sensor_from_config(imu)
     pitch = PitchEstimator(
         slope_accel_axis=str(imu["slope_accel_axis"]),
         gravity_accel_axis=str(imu["gravity_accel_axis"]), gyro_axis=str(imu["gyro_axis"]),
@@ -178,26 +202,8 @@ def calibrate_limits(args: argparse.Namespace, config: dict, path: Path) -> int:
         if args.apply:
             update_config(path, limits=limits, soft_limit_firmware=actuator.firmware)
             print("已写入 %s" % path)
-        print("1. 保持松轴")
-        print("2. 使能锁紧")
-        if input("选择 [1/2]: ").strip() != "2":
-            return 0
         actuator.soft_limit_min_deg, actuator.soft_limit_max_deg = limits
-        actuator.enable()
-        print("1. 不回零")
-        print("2. 2 秒后回零")
-        if input("选择 [1/2]: ").strip() != "2":
-            keep_enabled = True
-            print("已锁紧")
-            return 0
-        if not limits[0] <= 0 <= limits[1]:
-            raise RuntimeError("Y42 坐标零点不在刚采集的软限位内，拒绝回中")
-        print("2 秒后回零")
-        countdown(2)
-        actuator.home_absolute_zero()
-        position = wait_for_absolute_home(actuator)
-        keep_enabled = True
-        print("已回零：%.3f°" % position)
+        keep_enabled = finish_calibration(actuator, limits)
     finally:
         actuator.close(disable=not keep_enabled)
     return 0
@@ -217,6 +223,7 @@ def calibrate_crank(args: argparse.Namespace, config: dict, path: Path) -> int:
     actuator = build_actuator(config)
     sensor, pitch = build_pitch(config)
     measurements: list[tuple[float, float]] = []
+    keep_enabled = False
     sensor.open()
     try:
         sensor.configure()
@@ -253,15 +260,16 @@ def calibrate_crank(args: argparse.Namespace, config: dict, path: Path) -> int:
             measurements.append((actual, tube))
             print("  实际电机 %.3f°，水管 %.3f°" % (actual, tube))
             current = actual
+        crank_map = invert_crank_samples(measurements)
+        print("\n建议写入：")
+        print("  motor_deg_by_tube_angle: %s" % crank_map)
+        if args.apply:
+            update_config(path, crank_map=crank_map)
+            print("已写入 %s" % path)
+        keep_enabled = finish_calibration(actuator, (lower, upper))
     finally:
-        actuator.close()
+        actuator.close(disable=not keep_enabled)
         sensor.close()
-    crank_map = invert_crank_samples(measurements)
-    print("\n建议写入：")
-    print("  motor_deg_by_tube_angle: %s" % crank_map)
-    if args.apply:
-        update_config(path, crank_map=crank_map)
-        print("已写入 %s" % path)
     return 0
 
 

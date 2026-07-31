@@ -46,7 +46,7 @@ robot_car/
 │   ├── run_roller_balance_uart.sh      # 顶置滚珠位置偏差的安全 UART 输出入口
 │   ├── run_roller_balance_can.sh       # 独立的 ICM42688/Y42 直接 CAN 控制入口，默认不使能
 │   ├── calibrate_roller_control.sh     # 交互采集 Y42 软限位和曲轴-水管标定表
-│   ├── probe_icm42688.sh                # 只读探测 SPI 片选上的 ICM42688 身份寄存器
+│   ├── probe_icm42688.sh                # 按配置只读探测 ICM42688 的 WHO_AM_I
 │   ├── monitor_icm42688.sh              # 只读输出 IMU 原始值和俯仰角，不打开 CAN
 │   ├── capture_protocol_frames.py       # 协议帧抓包和解析测试工具
 │   └── capture_protocol_frames_windows.bat # Windows 抓包测试入口
@@ -108,7 +108,7 @@ robot_car/
 │           ├── metrics.py             # 线程安全的轻量计数器/指标快照
 │           └── recorder.py            # 可选 JSON-lines 视觉事件记录器
 │       └── roller_control/            # 与 UART/MSPM0 解耦的直接摆杆闭环模块
-│           ├── icm42688.py            # SPI 身份校验、配置和原始 IMU 数据读取
+│           ├── icm42688.py            # SPI/I2C 身份校验、配置和原始 IMU 数据读取
 │           ├── attitude.py            # 单轴互补滤波，输出摆杆实际俯仰角
 │           ├── control.py             # 钢球状态估计、坡度补偿和级联 PID
 │           ├── y42_actuator.py        # 复用 canstep 的 Y42 CAN 协议执行器

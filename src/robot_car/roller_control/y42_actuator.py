@@ -146,7 +146,9 @@ class Y42Actuator:
         arguments = SimpleNamespace(command=command, address=self.address, firmware=self.firmware,
                                     sync=False, **kwargs)
         address, payload = self.payload_builder(arguments)
-        self.payload_sender(self.driver, address, payload, self.packet_gap_ms)
+        # EMM position commands exceed one CAN frame. The motor requires the
+        # function byte (FD) at the start of every continuation frame.
+        self.payload_sender(self.driver, address, payload, self.packet_gap_ms, len(payload) > 8)
         if confirm:
             self._confirm_command(payload[0], timeout_s=confirm_timeout_s)
 

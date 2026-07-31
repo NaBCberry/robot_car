@@ -41,6 +41,21 @@ class RollerControlTests(unittest.TestCase):
         self.assertGreater(command.target_motor_angle_deg, 0)
         self.assertLessEqual(abs(command.acceleration_command_mm_s2), 2_000)
 
+    def test_tilt_sign_reverses_the_ball_correction_direction(self):
+        common = dict(
+            position_pid=pid(100), velocity_pid=pid(2_000), angle_pid=pid(20),
+            slope_bias=LinearTable([[-100, 0], [100, 0]], name="slope_bias"),
+            motor_by_tube_angle=LinearTable([[-15, -150], [0, 0], [15, 150]], name="motor_curve"),
+            target_min_mm=-100, target_max_mm=100, tube_angle_min_deg=-15,
+            tube_angle_max_deg=15, motor_angle_min_deg=-120, motor_angle_max_deg=120,
+        )
+        positive = RollerController(**common, tilt_sign=1)
+        negative = RollerController(**common, tilt_sign=-1)
+        ball = BallState(1000, 0, 0, 0)
+
+        self.assertGreater(positive.step(20, ball, 0, 0.02).target_tube_angle_deg, 0)
+        self.assertLess(negative.step(20, ball, 0, 0.02).target_tube_angle_deg, 0)
+
     def test_target_outside_tube_range_is_rejected(self):
         controller = RollerController(
             pid(10), pid(10), pid(10),
