@@ -31,6 +31,13 @@ class ActionDispatcherTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "target_mm"):
             dispatcher.request(ActionId.LINE_LAP_BALANCE_TARGET, now_ms=0)
 
+    def test_m0_checkpoint_completes_lap_action(self):
+        dispatcher = ActionDispatcher({})
+        dispatcher.request(ActionId.LINE_LAP_TO_A, now_ms=1000)
+        dispatcher.handle_telemetry({"checkpoint": "A"}, now_ms=3200)
+        self.assertEqual(dispatcher.snapshot(3200).status, "COMPLETE")
+        self.assertEqual(dispatcher.snapshot(3200).reason, "checkpoint_a")
+
 
 if __name__ == "__main__":
     unittest.main()
