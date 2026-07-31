@@ -71,6 +71,8 @@ class VehicleDaemon:
             while not self.stop_event.is_set():
                 event = self.subscriber.receive(timeout=min(interval, 0.05))
                 now_ms = monotonic_ms()
+                if self.stop_event.is_set():
+                    break
                 if event is not None:
                     self.state_machine.handle_event(event, now_ms)
                     self.control_arbiter.handle_event(event, now_ms)
