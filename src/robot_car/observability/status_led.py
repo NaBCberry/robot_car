@@ -17,7 +17,9 @@ OFF: Color = (0, 0, 0)
 RED: Color = (255, 0, 0)
 GREEN: Color = (0, 255, 0)
 BLUE: Color = (0, 0, 255)
-YELLOW: Color = (255, 180, 0)
+# Use equal red/green channels. At the configured 1% brightness, a dim amber
+# green component rounds to zero and becomes indistinguishable from red.
+YELLOW: Color = (255, 255, 0)
 PURPLE: Color = (180, 0, 255)
 WHITE: Color = (255, 255, 255)
 
