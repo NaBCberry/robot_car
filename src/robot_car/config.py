@@ -39,6 +39,7 @@ SAFE_DEFAULTS: Dict[str, Any] = {
         },
         "balance": {"enabled": False, "output_only": False, "require_feedback": True,
                     "state_timeout_ms": 120},
+        "actions": {"enabled": True, "default_timeout_ms": 30000},
     },
     "transport": {
         "enabled": False,
@@ -155,6 +156,11 @@ def _validate_safe(config: Dict[str, Any]) -> None:
         raise ValueError("vehicle.balance.require_feedback must be a YAML boolean")
     if not 0 < int(balance.get("state_timeout_ms", 0)) <= 0xFFFF:
         raise ValueError("vehicle.balance.state_timeout_ms must fit uint16 and be positive")
+    actions = vehicle.get("actions", {})
+    if not isinstance(actions.get("enabled", True), bool):
+        raise ValueError("vehicle.actions.enabled must be a YAML boolean")
+    if not 0 < int(actions.get("default_timeout_ms", 0)) <= 0xFFFFFFFF:
+        raise ValueError("vehicle.actions.default_timeout_ms must be positive")
 
 
 def ensure_runtime_dirs(config: Dict[str, Any]) -> Dict[str, Path]:

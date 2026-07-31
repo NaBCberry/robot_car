@@ -128,6 +128,17 @@ RDK 计算或发送。当钢球丢失、状态过期、平衡开关关闭或 RDK
 和 `capture_state`。捕获反馈关闭时，MSPM0 只能上报 `CAPTURE_ATTEMPTED`，不能把
 已发出磁铁动作误报为 `CAPTURED`。
 
+若用于滚珠控制的车体惯性前馈，建议在同一 JSON 中增加：
+
+```json
+{"vehicle_motion":{"valid":true,"source":"m0_imu",
+"ax_mm_s2":120,"ay_mm_s2":-8,"az_mm_s2":15,
+"speed_mm_s":380,"yaw_rate_mdeg_s":420,"timestamp_ms":123456}}
+```
+
+RDK 必须校验 `valid`、时间戳和超时；数据无效或超过配置限幅时回退到纯反馈控制。
+铰链端 ICM42688 的局部加速度不得直接标记为 `source=m0_imu`。
+
 ## CAN 映射
 
 CAN 沿用相同编码帧和字节序。对 Classical CAN，每段数据的第一个字节为分段控制字，

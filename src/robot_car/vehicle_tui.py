@@ -55,9 +55,10 @@ def _draw(screen: Any, daemon: Any, roller_config: Dict[str, Any], input_buffer:
     screen.erase()
     snapshot = daemon.ui_snapshot()
     action = snapshot["action"]
-    pid = roller_config.get("position_pid", {})
-    vel = roller_config.get("velocity_pid", {})
-    angle = roller_config.get("angle_pid", {})
+    control = roller_config.get("control", roller_config)
+    pid = control.get("position_pid", {})
+    vel = control.get("velocity_pid", {})
+    angle = control.get("angle_pid", {})
     screen.addnstr(0, 0, "RDK vehicle control TUI", max(1, curses.COLS - 1))
     status = (f"PID p={_pid(pid)} v={_pid(vel)} a={_pid(angle)} | "
               f"当前动作={action.get('action_id') or '-'}({ACTION_NAMES.get(action.get('action_id'), '-')}) "

@@ -307,3 +307,32 @@ OpenCV 未被自动安装；基础 Python 依赖记录于 `requirements.txt`。
 `PYTHONPATH`、工作目录和运行目录。模板未写死 `User=root`；部署者应选择
 非特权用户，再授予所需 `video`、`dialout` 或已配置 CAN 访问权限。模板
 默认仍使用 FakeTransport，修改、安装和启用服务必须另行人工确认。
+
+## 赛题动作调度与 TUI
+
+统一动作入口为：
+
+```bash
+cd /userdata/rdkstudio/projects/robot_car
+./scripts/run_vehicle_tui.sh --transport uart
+```
+
+界面输入动作编号并回车即可执行，`S` 或 `ESC` 停止，`Q` 安全退出。动作编号为：
+
+| 编号 | 动作 |
+|---:|---|
+| 0 | 停止 |
+| 1 | 顺时针巡线一圈回 A |
+| 2 | 钢球 `0 -> +50mm -> -50mm` |
+| 3 | 巡线到 B 并保持钢球中心 |
+| 4 | 巡线一圈并保持钢球中心 |
+| 5 | 巡线一圈并保持启动时钢球位置 |
+
+下位机通过 `CMD_EVENT/ACTION_REQUEST` 请求动作时，RDK 会按协议帧序号去重，
+先回复 ACK，再把请求送入与 TUI 相同的动作调度器。动作状态、当前阶段、最近下位机
+动作号和钢球误差只刷新 TUI 的状态行，不会绕过安全看门狗。
+
+滚珠直接 CAN 控制链的加速度前馈配置位于 `config/roller_control.yaml` 的
+`control.feedforward`，默认关闭。当前铰链端 ICM42688 只能作为摆杆姿态/角速度来源；
+要启用车体惯性前馈，应先接入经过校准的 M0 车体加速度遥测或把传感器固定到车体，
+再设置 `enabled: true`、`gain` 和 `limit_mm_s2`。

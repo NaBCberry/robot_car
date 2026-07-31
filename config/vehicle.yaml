@@ -29,3 +29,7 @@ vehicle:
     # M0 currently receives only; visual-state timeout still sends a safe frame.
     require_feedback: false
     state_timeout_ms: 120
+  actions:
+    # Requests are accepted from UART and TUI, then pass through the safety watchdogs.
+    enabled: true
+    default_timeout_ms: 30000

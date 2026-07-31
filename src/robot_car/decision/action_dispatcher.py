@@ -74,6 +74,8 @@ class ActionDispatcher:
             action = ActionId(int(action_id))
         except (TypeError, ValueError) as error:
             raise ValueError(f"unknown action_id: {action_id}") from error
+        if not bool(self.config.get("actions", {}).get("enabled", True)):
+            raise RuntimeError("vehicle actions are disabled")
         parameters = parameters or {}
         self.last_remote_action_id = int(action) if source == "uart" else self.last_remote_action_id
         if action == ActionId.STOP:
