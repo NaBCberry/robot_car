@@ -3,8 +3,6 @@ camera:
   device: /dev/video0
   width: 1280
   height: 720
-  # This camera supports 1280x720 MJPG at 60 fps.  MJPG must be negotiated first
-  # in CameraCapture; uncompressed 720p modes commonly fall back to 15 fps.
   fps: 60
   pixel_format: MJPG
   test_image: ''
@@ -22,10 +20,10 @@ camera:
     - 1.0
     roller_balance:
       roi_xyxy:
-      - 68.84
-      - 296.59
-      - 1209.56
-      - 384.24
-      center_x_px: 625.99
-      mm_per_pixel: 0.219161
+      - 23.21
+      - 297.79
+      - 1245.58
+      - 363.83
+      center_x_px: 640.4
+      mm_per_pixel: 0.204522
       axis_direction: 1
