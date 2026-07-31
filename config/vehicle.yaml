@@ -26,4 +26,6 @@ vehicle:
     enabled: true
     # Permit fresh balance states to set enabled=1 at the UART gateway.
     output_only: false
+    # M0 currently receives only; visual-state timeout still sends a safe frame.
+    require_feedback: false
     state_timeout_ms: 120

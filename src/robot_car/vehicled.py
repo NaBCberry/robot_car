@@ -80,7 +80,8 @@ class VehicleDaemon:
                                  or (bool(capture.get("enabled", False))
                                      and bool(capture.get("output_only", False)))
                                  or (bool(balance.get("enabled", False))
-                                     and bool(balance.get("output_only", False))))
+                                     and (bool(balance.get("output_only", False))
+                                          or not bool(balance.get("require_feedback", True)))))
                 link_ok = self.gateway.watchdog.healthy(now_ms, allow_unseen=allow_unseen)
                 self.state_machine.update_safety(link_ok, bool(telemetry.get("estop", False)),
                                                  str(telemetry.get("fault", "")), now_ms)

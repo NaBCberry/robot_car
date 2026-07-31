@@ -51,14 +51,18 @@ flowchart LR
    配置和 `vehicle.balance.output_only: true`，验证 M0 或逻辑分析仪收到 6 字节平衡状态帧，
    且 `enabled=0,balance_valid=1`。仅输出模式可越过总控开关发送测量值，但绝不授权 MSPM0
    执行运动。
-3. 车轮悬空、急停有效时关闭 `output_only` 并开启 `control_enabled`。M0 必须在视觉状态或
-   心跳过期时停止积分并进入安全摆杆策略。
+3. 车轮悬空、急停有效时关闭 `output_only` 并开启 `control_enabled`。默认
+   `require_feedback: true`，M0 必须回传有效 ACK 或遥测，否则 RDK 会进入链路失效保护。
+   当前仅接收的 M0 可显式设置 `require_feedback: false`；此时 RDK 不再以 M0 回包判定链路，
+   但钢球视觉状态超过 `state_timeout_ms` 后仍会发送 `enabled=0,balance_valid=0` 的安全帧，
+   M0 也必须在该帧或命令有效期过期后停止积分并进入安全摆杆策略。
 
 中心 O 固定为平衡目标，`error_mm=0` 表示钢球位于中心。
 
 ## UART 输出启动
 
-默认现场配置使用 `/dev/ttyS1`、`115200` baud、`vehicle.balance.output_only: true`。
+默认现场配置使用 `/dev/ttyS1`、`115200` baud、`vehicle.balance.output_only: false`、
+`vehicle.balance.require_feedback: false`。
 相机标定和 `roller_balance` 插件已准备好后，执行：
 
 ```bash
@@ -68,5 +72,5 @@ cd /userdata/rdkstudio/projects/robot_car
 
 该脚本同时启动 `visiond` 与 `vehicled`。识别到钢球后，`vehicled` 按
 `vehicle.heartbeat_hz`（默认 20 Hz）发送 `CMD_MOTION/BALANCE_ROLLER`，其中只有
-`error_mm` 是平衡控制量，且 `enabled=0`。MSPM0 必须先适配当前 v2 的 6 字节平衡 payload；
-在完成悬空联调前，不要关闭 `output_only`。
+`error_mm` 是平衡控制量。当前现场配置会在视觉状态有效时发送 `enabled=1`；MSPM0 必须先
+适配当前 v2 的 6 字节平衡 payload，并实现自身的命令过期安全策略。

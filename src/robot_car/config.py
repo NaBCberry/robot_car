@@ -37,7 +37,8 @@ SAFE_DEFAULTS: Dict[str, Any] = {
             "no_feedback_policy": {"result": "CAPTURE_ATTEMPTED", "post_capture_action": "HOLD",
                                    "magnet_max_hold_ms": 3000},
         },
-        "balance": {"enabled": False, "output_only": False, "state_timeout_ms": 120},
+        "balance": {"enabled": False, "output_only": False, "require_feedback": True,
+                    "state_timeout_ms": 120},
     },
     "transport": {
         "enabled": False,
@@ -150,6 +151,8 @@ def _validate_safe(config: Dict[str, Any]) -> None:
         raise ValueError("vehicle.balance.enabled must be a YAML boolean")
     if not isinstance(balance.get("output_only", False), bool):
         raise ValueError("vehicle.balance.output_only must be a YAML boolean")
+    if not isinstance(balance.get("require_feedback", True), bool):
+        raise ValueError("vehicle.balance.require_feedback must be a YAML boolean")
     if not 0 < int(balance.get("state_timeout_ms", 0)) <= 0xFFFF:
         raise ValueError("vehicle.balance.state_timeout_ms must fit uint16 and be positive")
 

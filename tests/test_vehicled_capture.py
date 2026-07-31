@@ -162,6 +162,40 @@ class VehicleDaemonCaptureTests(unittest.TestCase):
         self.assertTrue(balance[0]["balance_valid"])
         self.assertEqual(balance[0]["error_mm"], -32)
 
+    def test_balance_without_feedback_still_authorizes_fresh_visual_state(self):
+        now_ms = time.monotonic_ns() // 1_000_000
+        config = {
+            "runtime": {"vision_socket": "/tmp/not-used.sock"},
+            "vehicle": {
+                "control_enabled": True,
+                "initial_mode": "IDLE",
+                "default_valid_for_ms": 120,
+                "heartbeat_hz": 1000,
+                "vision_timeout_ms": 500,
+                "link_timeout_ms": 500,
+                "balance": {"enabled": True, "output_only": False,
+                            "require_feedback": False, "state_timeout_ms": 120},
+            },
+        }
+        transport = FakeTransport()
+        daemon = VehicleDaemon(config, transport)
+        daemon.is_fake = False
+        event = VisionEvent(now_ms, "roller_balance", "BALL_BALANCE_STATE", 0.94,
+                            {"error_mm": 32}, 8, 120, 1280, 720)
+        daemon.subscriber = OneEventSubscriber(daemon, event)
+
+        daemon.run()
+
+        decoder = FrameDecoder()
+        messages = [message for frame in transport.sent for message in decoder.feed(frame)]
+        balance = [unpack_motion(message.payload) for message in messages
+                   if message.message_type == MessageType.CMD_MOTION
+                   and unpack_motion(message.payload)["mode"] == MotionMode.BALANCE_ROLLER]
+        self.assertEqual(len(balance), 1)
+        self.assertTrue(balance[0]["enabled"])
+        self.assertTrue(balance[0]["balance_valid"])
+        self.assertEqual(balance[0]["error_mm"], 32)
+
 
 if __name__ == "__main__":
     unittest.main()
