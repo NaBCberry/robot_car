@@ -28,6 +28,10 @@ class ControlArbiter:
         self.balance_enabled = bool(balance.get("enabled", False))
         self.balance_output_only = bool(balance.get("output_only", False))
         self.latest_balance: Optional[BalanceState] = None
+        self.balance_target_mm = 0.0
+
+    def set_balance_target(self, target_mm: float) -> None:
+        self.balance_target_mm = float(target_mm)
 
     def handle_event(self, event: VisionEvent, now_ms: int) -> None:
         if event.is_expired(now_ms):
@@ -67,9 +71,13 @@ class ControlArbiter:
                     or self.latest_balance.is_expired(now_ms)):
                 return MotionTarget(mode=MotionMode.BALANCE_ROLLER, enabled=False,
                                     valid_for_ms=fallback_motion.valid_for_ms)
+            adjusted = BalanceState(self.latest_balance.timestamp_monotonic_ms,
+                                    error_mm=round(self.latest_balance.error_mm - self.balance_target_mm),
+                                    valid_for_ms=self.latest_balance.valid_for_ms,
+                                    valid=self.latest_balance.valid)
             return MotionTarget(mode=MotionMode.BALANCE_ROLLER, enabled=fallback_motion.enabled,
                                 valid_for_ms=self.latest_balance.valid_for_ms,
-                                balance_state=self.latest_balance)
+                                balance_state=adjusted)
         if (not fallback_motion.enabled or self.latest_target is None
                 or self.latest_target.is_expired(now_ms)):
             return MotionTarget(mode=MotionMode.CAPTURE_TARGET_POLAR, enabled=False,

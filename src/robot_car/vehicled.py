@@ -7,10 +7,13 @@ import logging
 import signal
 import threading
 import time
+from pathlib import Path
 from typing import Any, Dict
 
 from robot_car.config import ensure_runtime_dirs, load_config
 from robot_car.decision.control_arbiter import ControlArbiter
+from robot_car.decision.action_dispatcher import ActionDispatcher
+from robot_car.decision.motion_target import MotionTarget
 from robot_car.decision.state_machine import VehicleStateMachine, monotonic_ms
 from robot_car.ipc.vision_socket import VisionEventSubscriber
 from robot_car.observability.logging import configure_logging
@@ -45,6 +48,9 @@ class VehicleDaemon:
         self.gateway = VehicleGateway(transport, config["vehicle"])
         self.state_machine = VehicleStateMachine(config["vehicle"])
         self.control_arbiter = ControlArbiter(config["vehicle"])
+        self.action_dispatcher = ActionDispatcher(config["vehicle"])
+        self.action_lock = threading.Lock()
+        self.ui_error = ""
         self.subscriber = VisionEventSubscriber(config["runtime"]["vision_socket"])
         self.stop_event = threading.Event()
         self.is_fake = isinstance(transport, FakeTransport)
@@ -67,6 +73,18 @@ class VehicleDaemon:
                 if event is not None:
                     self.state_machine.handle_event(event, now_ms)
                     self.control_arbiter.handle_event(event, now_ms)
+                    self.action_dispatcher.handle_event(event, now_ms)
+                while True:
+                    request = self.gateway.receive_action_request()
+                    if request is None:
+                        break
+                    try:
+                        self.request_action(request["action_id"], request.get("parameters"),
+                                            source="uart", now_ms=now_ms)
+                    except (KeyError, TypeError, ValueError) as error:
+                        LOG.warning("rejected action request: %s", error)
+                with self.action_lock:
+                    self.action_dispatcher.update(now_ms)
                 try:
                     self.gateway.poll(0.0)
                 except Exception:
@@ -89,7 +107,20 @@ class VehicleDaemon:
                 if now >= next_send:
                     if heartbeat_enabled:
                         self.gateway.send_heartbeat()
-                    motion = self.control_arbiter.select(now_ms, self.state_machine.target(now_ms))
+                    fallback = self.state_machine.target(now_ms)
+                    with self.action_lock:
+                        mode = self.action_dispatcher.motion_mode()
+                        action_target_mm = self.action_dispatcher.target_mm
+                    if mode is not None and self.state_machine.state.value not in {
+                            "FAILSAFE", "E_STOP", "FAULT"}:
+                        fallback = MotionTarget(mode=mode,
+                                                enabled=bool(self.config["vehicle"].get(
+                                                    "control_enabled", False)),
+                                                valid_for_ms=int(self.config["vehicle"].get(
+                                                    "default_valid_for_ms", 200)))
+                    self.control_arbiter.set_balance_target(
+                        action_target_mm or 0.0)
+                    motion = self.control_arbiter.select(now_ms, fallback)
                     self.gateway.send_motion(motion)
                     next_send = now + interval
         finally:
@@ -98,11 +129,28 @@ class VehicleDaemon:
             LOG.info("vehicled stopped; state=%s stats=%s", self.state_machine.state.value,
                      self.gateway.stats)
 
+    def request_action(self, action_id: int, parameters: Dict[str, Any] | None = None,
+                       *, source: str = "tui", now_ms: int | None = None) -> None:
+        with self.action_lock:
+            self.action_dispatcher.request(
+                action_id, parameters, source=source, now_ms=now_ms,
+                current_ball_error_mm=self.action_dispatcher.ball_error_mm)
+
+    def set_ui_error(self, value: str) -> None:
+        self.ui_error = value
+
+    def ui_snapshot(self) -> Dict[str, Any]:
+        with self.action_lock:
+            action = self.action_dispatcher.snapshot().to_dict()
+        return {"action": action, "gateway": dict(self.gateway.stats), "ui_error": self.ui_error}
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="RDK robot-car vehicle daemon")
     parser.add_argument("--config-dir", default="config")
     parser.add_argument("--transport", choices=("fake", "uart", "can"), default=None)
+    parser.add_argument("--tui", action="store_true", help="run the curses action selector")
+    parser.add_argument("--quiet", action="store_true", help="suppress informational console logging")
     return parser.parse_args()
 
 
@@ -111,7 +159,8 @@ def main() -> int:
     try:
         config = load_config(args.config_dir)
         paths = ensure_runtime_dirs(config)
-        configure_logging("vehicled", config["runtime"].get("log_level", "INFO"), paths["logs"])
+        configure_logging("vehicled", "WARNING" if args.quiet else
+                          config["runtime"].get("log_level", "INFO"), paths["logs"])
         daemon = VehicleDaemon(config, build_transport(config, args.transport))
     except Exception as error:
         logging.basicConfig(level=logging.INFO)
@@ -119,7 +168,24 @@ def main() -> int:
         return 2
     for signum in (signal.SIGINT, signal.SIGTERM):
         signal.signal(signum, lambda _signum, _frame: daemon.stop_event.set())
-    daemon.run()
+    if args.tui:
+        from robot_car.vehicle_tui import run_vehicle_tui
+        try:
+            import yaml
+            control_path = Path(args.config_dir) / "roller_control.yaml"
+            with control_path.open("r", encoding="utf-8") as stream:
+                roller_config = yaml.safe_load(stream) or {}
+        except (OSError, ValueError):
+            roller_config = {}
+        worker = threading.Thread(target=daemon.run, name="vehicled-control", daemon=True)
+        worker.start()
+        try:
+            run_vehicle_tui(daemon, roller_config)
+        finally:
+            daemon.stop_event.set()
+            worker.join(timeout=3.0)
+    else:
+        daemon.run()
     return 0
 
 

@@ -6,7 +6,7 @@ import json
 import struct
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import Any, Dict
+from typing import Any, Dict, Mapping
 
 
 PROTOCOL_VERSION = 2
@@ -53,6 +53,11 @@ MOTION_POLAR_TARGET_STRUCT = struct.Struct(">HiiHH")
 MOTION_BALANCE_ERROR_STRUCT = struct.Struct(">h")
 ACK_STRUCT = struct.Struct(">HB")
 HEARTBEAT_STRUCT = struct.Struct(">IH")
+ACTION_REQUEST_MAX_ID = 0xFF
+ACTION_REQUEST_MAX_REQUEST_ID = 0xFFFF
+ACK_STATUS_ACCEPTED = 0
+ACK_STATUS_DUPLICATE = 1
+ACK_STATUS_INVALID = 2
 MOTION_FLAG_ENABLED = 0x01
 MOTION_FLAG_TARGET_VALID = 0x02
 MOTION_FLAG_CAPTURE_ARMED = 0x04
@@ -201,6 +206,45 @@ def unpack_json(payload: bytes) -> Dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("JSON payload must be an object")
     return value
+
+
+def pack_action_request(action_id: int, request_id: int, parameters: Mapping[str, Any],
+                        valid_for_ms: int) -> bytes:
+    """Encode a lower-controller action request in the existing CMD_EVENT envelope."""
+    _validate_uint(int(action_id), "action_id", ACTION_REQUEST_MAX_ID)
+    _validate_uint(int(request_id), "request_id", ACTION_REQUEST_MAX_REQUEST_ID)
+    _validate_uint(int(valid_for_ms), "valid_for_ms", 0xFFFF, minimum=1)
+    if not isinstance(parameters, Mapping):
+        raise ValueError("action parameters must be an object")
+    return pack_json({"event_type": "ACTION_REQUEST",
+                      "payload": {"action_id": int(action_id),
+                                  "request_id": int(request_id),
+                                  "parameters": dict(parameters)},
+                      "valid_for_ms": int(valid_for_ms)})
+
+
+def unpack_action_request(payload: bytes) -> Dict[str, Any]:
+    """Decode and validate an ACTION_REQUEST CMD_EVENT payload."""
+    value = unpack_json(payload)
+    if value.get("event_type") != "ACTION_REQUEST":
+        raise ValueError("CMD_EVENT is not an ACTION_REQUEST")
+    body = value.get("payload")
+    if not isinstance(body, dict):
+        raise ValueError("ACTION_REQUEST payload must be an object")
+    try:
+        action_id = int(body["action_id"])
+        request_id = int(body["request_id"])
+        valid_for_ms = int(value["valid_for_ms"])
+    except (KeyError, TypeError, ValueError, OverflowError) as error:
+        raise ValueError("ACTION_REQUEST has invalid fields") from error
+    _validate_uint(action_id, "action_id", ACTION_REQUEST_MAX_ID)
+    _validate_uint(request_id, "request_id", ACTION_REQUEST_MAX_REQUEST_ID)
+    _validate_uint(valid_for_ms, "valid_for_ms", 0xFFFF, minimum=1)
+    parameters = body.get("parameters", {})
+    if not isinstance(parameters, dict):
+        raise ValueError("ACTION_REQUEST parameters must be an object")
+    return {"action_id": action_id, "request_id": request_id,
+            "parameters": dict(parameters), "valid_for_ms": valid_for_ms}
 
 
 def pack_ack(acknowledged_sequence: int, status: int = 0) -> bytes:

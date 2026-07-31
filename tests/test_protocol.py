@@ -8,7 +8,8 @@ from robot_car.protocol.framing import (CRC, HEADER, MAGIC, MAX_PAYLOAD, FrameDe
                                         ProtocolError, crc16_ccitt, decode_packet, encode_frame)
 from robot_car.protocol.messages import (MOTION_COMMON_STRUCT, MOTION_FLAG_ENABLED,
                                          MessageType, MotionMode, PROTOCOL_VERSION,
-                                         ProtocolMessage, pack_ack, pack_motion, unpack_ack,
+                                         ProtocolMessage, pack_ack, pack_action_request,
+                                         pack_motion, unpack_ack, unpack_action_request,
                                          unpack_motion)
 from robot_car.vehicle_link.fake_transport import FakeTransport
 from robot_car.vehicle_link.gateway import VehicleGateway
@@ -131,6 +132,31 @@ class ProtocolTests(unittest.TestCase):
 
     def test_ack_payload(self):
         self.assertEqual(unpack_ack(pack_ack(65535, 2)), {"acknowledged_sequence": 65535, "status": 2})
+
+    def test_action_request_round_trip_and_validation(self):
+        payload = pack_action_request(3, 128, {"target_mm": 50}, 1000)
+        self.assertEqual(unpack_action_request(payload), {
+            "action_id": 3, "request_id": 128, "parameters": {"target_mm": 50},
+            "valid_for_ms": 1000,
+        })
+        with self.assertRaises(ValueError):
+            pack_action_request(256, 1, {}, 1000)
+
+    def test_gateway_queues_remote_action_once_and_acknowledges_duplicate(self):
+        transport = FakeTransport()
+        gateway = VehicleGateway(transport, {"control_enabled": False, "default_valid_for_ms": 200})
+        gateway.open()
+        remote = ProtocolMessage(MessageType.CMD_EVENT, 77,
+                                  pack_action_request(2, 9, {"target_mm": -50}, 1000))
+        frame = encode_frame(remote)
+        transport.inject(frame + frame)
+        gateway.poll()
+        request = gateway.receive_action_request()
+        self.assertEqual(request["action_id"], 2)
+        self.assertIsNone(gateway.receive_action_request())
+        replies = [FrameDecoder().feed(item)[0] for item in transport.sent[1:]]
+        self.assertEqual([unpack_ack(item.payload)["status"] for item in replies], [0, 1])
+        gateway.close()
 
     def test_gateway_polar_target_obeys_safety_gate(self):
         transport = FakeTransport()

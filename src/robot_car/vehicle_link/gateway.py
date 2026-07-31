@@ -5,12 +5,16 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections import deque
+from queue import Empty, Queue
 from typing import Any, Dict, Optional
 
 from robot_car.decision.motion_target import MotionTarget
 from robot_car.protocol.framing import FrameDecoder, encode_frame
-from robot_car.protocol.messages import (HEARTBEAT_STRUCT, MessageType, MotionMode,
-                                         ProtocolMessage, pack_json, pack_motion, unpack_ack,
+from robot_car.protocol.messages import (ACK_STATUS_ACCEPTED, ACK_STATUS_DUPLICATE,
+                                         ACK_STATUS_INVALID, HEARTBEAT_STRUCT, MessageType,
+                                         MotionMode, ProtocolMessage, pack_ack, pack_json,
+                                         pack_motion, unpack_ack, unpack_action_request,
                                          unpack_json)
 
 from .telemetry import TelemetryCache
@@ -31,6 +35,9 @@ class VehicleGateway:
                       "unknown_acks": 0, "old_sequence": 0}
         self.pending: Dict[int, float] = {}
         self.last_remote_sequence: Optional[int] = None
+        self.last_action_request: Optional[Dict[str, Any]] = None
+        self._action_requests: "Queue[Dict[str, Any]]" = Queue()
+        self._seen_action_sequences = deque(maxlen=128)
         self._lock = threading.Lock()
 
     def open(self) -> None:
@@ -104,6 +111,13 @@ class VehicleGateway:
         return self._send(MessageType.CMD_EVENT, pack_json({"event_type": event_type,
                           "payload": payload, "valid_for_ms": valid_for_ms}), expect_ack=True)
 
+    def receive_action_request(self, timeout: float = 0.0) -> Optional[Dict[str, Any]]:
+        """Return the next validated, de-duplicated remote action request."""
+        try:
+            return self._action_requests.get(timeout=timeout)
+        except Empty:
+            return None
+
     def send_heartbeat(self) -> int:
         now_ms = (time.monotonic_ns() // 1_000_000) & 0xFFFFFFFF
         validity = int(self.config.get("default_valid_for_ms", 200))
@@ -126,7 +140,27 @@ class VehicleGateway:
         self.stats["decode_errors"] += self.decoder.errors - previous_errors
 
     def _handle(self, message: ProtocolMessage) -> None:
-        if message.message_type == MessageType.TELEMETRY:
+        if message.message_type == MessageType.CMD_EVENT:
+            try:
+                event = unpack_json(message.payload)
+                if event.get("event_type") != "ACTION_REQUEST":
+                    return
+                request = unpack_action_request(message.payload)
+            except (TypeError, ValueError) as error:
+                LOG.warning("invalid remote action request: %s", error)
+                self._send(MessageType.ACK, pack_ack(message.sequence, ACK_STATUS_INVALID))
+                return
+            if message.sequence in self._seen_action_sequences:
+                self.stats["old_sequence"] += 1
+                self._send(MessageType.ACK, pack_ack(message.sequence, ACK_STATUS_DUPLICATE))
+                return
+            self._seen_action_sequences.append(message.sequence)
+            request["frame_sequence"] = message.sequence
+            request["received_monotonic_ms"] = time.monotonic_ns() // 1_000_000
+            self.last_action_request = dict(request)
+            self._action_requests.put(request)
+            self._send(MessageType.ACK, pack_ack(message.sequence, ACK_STATUS_ACCEPTED))
+        elif message.message_type == MessageType.TELEMETRY:
             self.telemetry.update(unpack_json(message.payload))
         elif message.message_type == MessageType.ACK:
             ack = unpack_ack(message.payload)

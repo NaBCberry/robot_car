@@ -37,6 +37,21 @@ UART 帧以固定两字节帧头 `0xA5 0x5A` 开始，**没有帧尾，也不使
 
 `CMD_EVENT` 可用于低频业务事件，但不是车轮、PWM 或极坐标目标的承载方式。
 
+### `ACTION_REQUEST`（下位机 -> RDK）
+
+为保持 v2 兼容，下位机请求 RDK 执行赛题动作时使用 `CMD_EVENT`，其 UTF-8 JSON
+格式如下：
+
+```json
+{"event_type":"ACTION_REQUEST","payload":{"action_id":3,"request_id":128,
+"parameters":{"target_mm":50}},"valid_for_ms":1000}
+```
+
+`action_id` 和 `request_id` 均为无符号整数，分别占用 1 字节和 2 字节语义范围；
+`parameters` 必须是 JSON 对象。RDK 按协议帧 `sequence` 去重，第一次收到时放入动作
+队列并回复 `ACK status=0`，重复帧回复 `status=1` 且不得再次执行，字段非法时回复
+`status=2`。动作是否完成通过后续状态遥测或 `ACTION_STATUS` 事件报告。
+
 ## `CMD_MOTION`
 
 `CMD_MOTION` 表达 MSPM0 应执行的**高层运动模式**，不包含左右轮转速、转向角、
