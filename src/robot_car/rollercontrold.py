@@ -34,13 +34,16 @@ class RollerControlDaemon:
     def __init__(self, app_config: dict, control_config: dict, *, armed: bool,
                  dry_run: bool, target_mm: float | None, telemetry_hz: float,
                  task: int = 1, show_tx: bool = False, home: bool = False,
-                 auto_confirm: bool = False) -> None:
+                 auto_confirm: bool = False, start_immediately: bool = False,
+                 quiet: bool = False) -> None:
         self.app_config = app_config
         self.control_config = control_config
         self.armed = armed and bool(control_config.get("enabled", False))
         self.dry_run = dry_run
         self.home_requested = home
         self.auto_confirm = auto_confirm
+        self.start_immediately = start_immediately
+        self.quiet = quiet
         self.stop_event = threading.Event()
         imu = control_config["imu"]
         motor = control_config["motor"]
@@ -78,11 +81,12 @@ class RollerControlDaemon:
         self.target_mm = 0.0 if task in (1, 2) else float(
             control_config.get("target_mm", 0) if target_mm is None else target_mm)
         self.task = task
-        self.sequence_state = "CENTERING" if task == 2 else "CONTINUOUS"
-        self.sequence_target_mm = 0.0
+        self.sequence_state = "TO_POSITIVE" if task == 2 and start_immediately else (
+            "CENTERING" if task == 2 else "CONTINUOUS")
+        self.sequence_target_mm = 50.0 if task == 2 and start_immediately else 0.0
         self.sequence_stable_since_s: float | None = None
         self.sequence_prompted = False
-        self.sequence_started_s: float | None = None
+        self.sequence_started_s: float | None = time.monotonic() if task == 2 and start_immediately else None
         self.sequence_timed_out = False
         self.sequence_confirmations: Queue[str] = Queue()
         self.sequence_input_thread: threading.Thread | None = None
@@ -102,6 +106,10 @@ class RollerControlDaemon:
         self.last_command_s = 0.0
         self.last_safe = False
 
+    def _announce(self, message: str) -> None:
+        if not self.quiet:
+            print(message, flush=True)
+
     def run(self) -> None:
         self.sensor.open()
         self.sensor.configure()
@@ -115,7 +123,7 @@ class RollerControlDaemon:
             if self.armed:
                 self.actuator.enable()
             if self.home_requested:
-                print("开始回零（绝对坐标零点）...", flush=True)
+                self._announce("开始回零（绝对坐标零点）...")
                 position = self.actuator.home_absolute_zero(wait=True, timeout_s=30.0)
                 if position is not None:
                     LOG.info("absolute home complete: %.3f deg", position)
@@ -146,14 +154,14 @@ class RollerControlDaemon:
         if event.is_expired(now_ms):
             if not self.reported_stale_ball_state:
                 self.reported_stale_ball_state = True
-                print("收到钢球视觉数据但已过期；请检查视觉推理延迟和 TTL 配置。", flush=True)
+                self._announce("收到钢球视觉数据但已过期；请检查视觉推理延迟和 TTL 配置。")
             return
         try:
             self.ball = self.ball_estimator.update(event.timestamp_monotonic_ms,
                                                     float(event.payload["error_mm"]))
             if not self.received_ball_state:
                 self.received_ball_state = True
-                print("已接收滚珠视觉数据，开始回中判定。", flush=True)
+                self._announce("已接收滚珠视觉数据，开始回中判定。")
         except (KeyError, TypeError, ValueError) as error:
             LOG.warning("ignored invalid ball state: %s", error)
 
@@ -213,7 +221,7 @@ class RollerControlDaemon:
         self.sequence_stable_since_s = None
         self.controller.reset()
         prefix = "自动确认：" if automatic else "已确认："
-        print(prefix + "开始计时，前往 +5cm。", flush=True)
+        self._announce(prefix + "开始计时，前往 +5cm。")
 
     def _update_two_point_sequence(self, now_s: float) -> None:
         ball = self.ball
@@ -248,7 +256,7 @@ class RollerControlDaemon:
                 else:
                     self.sequence_state = "WAIT_CONFIRM"
                     LOG.info("钢球已回中并稳定，请确认后开始题3计时")
-                    print("钢球已在 ±5mm 内稳定超过2s。输入 Y 并回车后开始计时。", flush=True)
+                    self._announce("钢球已在 ±5mm 内稳定超过2s。输入 Y 并回车后开始计时。")
                     self.sequence_input_thread = threading.Thread(
                         target=self._read_sequence_confirmation,
                         name="roller-sequence-input", daemon=True)
@@ -262,7 +270,7 @@ class RollerControlDaemon:
                 self.sequence_prompted = False
                 self.sequence_state = "CENTERING"
                 self.sequence_stable_since_s = None
-                print("未确认，继续回中；稳定后会再次提示。", flush=True)
+                self._announce("未确认，继续回中；稳定后会再次提示。")
                 return
             self._begin_two_point_sequence(now_s, automatic=False)
         elif (self.sequence_state == "TO_POSITIVE"
@@ -272,18 +280,18 @@ class RollerControlDaemon:
             self.sequence_target_mm = -50.0
             self.sequence_stable_since_s = None
             self.controller.reset()
-            print("已到达 +5cm 且速度接近零，开始平滑返回 -5cm。", flush=True)
+            self._announce("已到达 +5cm 且速度接近零，开始平滑返回 -5cm。")
         elif self.sequence_state == "TO_NEGATIVE" and held_s >= 0.20:
             elapsed = 0.0 if self.sequence_started_s is None else now_s - self.sequence_started_s
             self.sequence_state = "COMPLETE"
             timeout_note = "（已超过5s）" if self.sequence_timed_out else ""
-            print(f"-5cm 已稳定，计时结束：{elapsed:.3f}s{timeout_note}；继续保持 -5cm。", flush=True)
+            self._announce(f"-5cm 已稳定，计时结束：{elapsed:.3f}s{timeout_note}；继续保持 -5cm。")
             LOG.info("题3两点运动完成，总时长 %.3fs%s；继续保持 -5cm", elapsed, timeout_note)
 
     def _sequence_timeout(self, now_s: float) -> None:
         elapsed = 0.0 if self.sequence_started_s is None else now_s - self.sequence_started_s
         self.sequence_timed_out = True
-        print(f"题3两点运动已超过5s（当前 {elapsed:.3f}s），继续运行至 -5cm。", flush=True)
+        self._announce(f"题3两点运动已超过5s（当前 {elapsed:.3f}s），继续运行至 -5cm。")
         LOG.warning("题3两点运动超时：%.3fs", elapsed)
 
     def _receive_motor_feedback(self) -> None:
@@ -305,7 +313,7 @@ class RollerControlDaemon:
         self.last_safe = True
         LOG.warning("roller controller safety stop: %s", reason)
         if reason == "ball state timeout" and not self.received_ball_state:
-            print("等待有效钢球识别数据；请确认网页持续显示钢球误差。", flush=True)
+            self._announce("等待有效钢球识别数据；请确认网页持续显示钢球误差。")
         if self.armed or self.dry_run:
             self.actuator.stop()
 
@@ -325,6 +333,8 @@ def parse_args() -> argparse.Namespace:
                         help="log vision/IMU/Y42 feedback at 0..20 Hz; 0 disables feedback")
     parser.add_argument("--task", type=int, choices=(1, 2), default=1,
                         help="1: continuously hold center; 2: center then +50/-50 cm test (timeout reports only)")
+    parser.add_argument("--immediate", action="store_true",
+                        help="题3专用：假定钢球已手工置于 0 点，立即执行 +50mm -> -50mm")
     return parser.parse_args()
 
 
@@ -335,11 +345,14 @@ def main() -> int:
         paths = ensure_runtime_dirs(app_config)
         configure_logging("rollercontrold", app_config["runtime"].get("log_level", "INFO"), paths["logs"])
         control_path = args.control_config or str(Path(args.config_dir) / "roller_control.yaml")
+        if args.immediate and args.task != 2:
+            raise ValueError("--immediate 仅适用于 --task 2")
         daemon = RollerControlDaemon(app_config, load_roller_control(control_path), armed=args.arm,
                                      dry_run=args.dry_run, target_mm=args.target_mm,
                                      telemetry_hz=args.telemetry_hz, task=args.task,
                                      show_tx=args.show_tx, home=args.home,
-                                     auto_confirm=args.auto_confirm)
+                                     auto_confirm=args.auto_confirm,
+                                     start_immediately=args.immediate)
     except Exception as error:
         logging.basicConfig(level=logging.INFO)
         LOG.error("safe startup failure: %s", error)

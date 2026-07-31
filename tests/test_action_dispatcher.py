@@ -45,6 +45,15 @@ class ActionDispatcherTests(unittest.TestCase):
         self.assertEqual(dispatcher.phase, "MOTOR_HOME")
         self.assertIsNone(dispatcher.motion_mode())
 
+    def test_direct_task_three_progress_does_not_use_m0_balance_motion(self):
+        dispatcher = ActionDispatcher({})
+        dispatcher.request(ActionId.ROLLER_SWEEP, now_ms=1000)
+        dispatcher.set_direct_roller_progress("TO_POSITIVE", 50.0)
+        dispatcher.ball_error_mm = 50.0
+        dispatcher.update(1200)
+        self.assertEqual(dispatcher.phase, "DIRECT_TO_POSITIVE")
+        self.assertEqual(dispatcher.target_mm, 50.0)
+
     def test_m0_checkpoint_completes_lap_action(self):
         dispatcher = ActionDispatcher({})
         dispatcher.request(ActionId.LINE_LAP_TO_A, now_ms=1000)

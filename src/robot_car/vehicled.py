@@ -19,6 +19,8 @@ from robot_car.ipc.vision_socket import VisionEventSubscriber
 from robot_car.observability.logging import configure_logging
 from robot_car.observability.status_led import StatusLedController
 from robot_car.roller_control.homing import HomeCancelled, home_from_config_file
+from robot_car.roller_control.config import load_roller_control
+from robot_car.rollercontrold import RollerControlDaemon
 from robot_car.vehicle_link.can_transport import CanTransport
 from robot_car.vehicle_link.fake_transport import FakeTransport
 from robot_car.vehicle_link.gateway import VehicleGateway
@@ -56,6 +58,8 @@ class VehicleDaemon:
         self.roller_control_path = Path(roller_control_path)
         self._roller_home_thread: threading.Thread | None = None
         self._roller_home_cancel = threading.Event()
+        self._roller_sweep: RollerControlDaemon | None = None
+        self._roller_sweep_thread: threading.Thread | None = None
         self._last_vision_event_ms: int | None = None
         self.status_led = StatusLedController(config["vehicle"].get("status_led", {}))
         self.ui_error = ""
@@ -97,6 +101,7 @@ class VehicleDaemon:
                         LOG.warning("rejected action request: %s", error)
                 with self.action_lock:
                     self.action_dispatcher.update(now_ms)
+                    self._sync_roller_sweep_status()
                 try:
                     self.gateway.poll(0.0)
                 except Exception:
@@ -156,7 +161,7 @@ class VehicleDaemon:
                     with self.action_lock:
                         mode = self.action_dispatcher.motion_mode()
                         action_target_mm = self.action_dispatcher.target_mm
-                    if self._roller_home_active():
+                    if self._roller_home_active() or self._roller_sweep_active():
                         fallback = MotionTarget(enabled=False, valid_for_ms=int(
                             self.config["vehicle"].get("default_valid_for_ms", 200)))
                     elif mode is not None and self.state_machine.state.value not in {
@@ -172,6 +177,7 @@ class VehicleDaemon:
                     self.gateway.send_motion(motion)
                     next_send = now + interval
         finally:
+            self._stop_roller_sweep()
             self.status_led.close()
             self.subscriber.close()
             self.gateway.close()
@@ -180,15 +186,88 @@ class VehicleDaemon:
 
     def request_action(self, action_id: int, parameters: Dict[str, Any] | None = None,
                        *, source: str = "tui", now_ms: int | None = None) -> None:
+        action = ActionId(int(action_id))
+        if action != ActionId.ROLLER_SWEEP:
+            sweep_stopped = self._stop_roller_sweep()
+            if not sweep_stopped and action != ActionId.STOP:
+                raise RuntimeError("direct roller controller has not released the CAN bus")
         if int(action_id) == int(ActionId.STOP):
             self._cancel_roller_home()
         if int(action_id) == int(ActionId.ROLLER_HOME):
             self._request_roller_home(parameters, source=source, now_ms=now_ms)
             return
+        if action == ActionId.ROLLER_SWEEP:
+            self._request_direct_roller_sweep(parameters, source=source, now_ms=now_ms)
+            return
         with self.action_lock:
             self.action_dispatcher.request(
                 action_id, parameters, source=source, now_ms=now_ms,
                 current_ball_error_mm=self.action_dispatcher.ball_error_mm)
+
+    def _request_direct_roller_sweep(self, parameters: Dict[str, Any] | None, *, source: str,
+                                     now_ms: int | None) -> None:
+        if self._roller_home_active():
+            raise RuntimeError("roller motor home is in progress")
+        if self._roller_sweep_active():
+            raise RuntimeError("task 3 roller sequence is already in progress")
+        control_config = load_roller_control(self.roller_control_path)
+        if not bool(control_config.get("enabled", False)):
+            raise RuntimeError("roller_control.yaml enabled must be true for task 3 direct CAN control")
+        controller = RollerControlDaemon(self.config, control_config, armed=True, dry_run=False,
+                                         target_mm=None, telemetry_hz=0, task=2,
+                                         auto_confirm=True, start_immediately=True, quiet=True)
+        with self.action_lock:
+            self.action_dispatcher.request(ActionId.ROLLER_SWEEP, parameters, source=source,
+                                           now_ms=now_ms,
+                                           current_ball_error_mm=self.action_dispatcher.ball_error_mm)
+            self.action_dispatcher.set_direct_roller_progress("TO_POSITIVE", 50.0)
+            self._roller_sweep = controller
+            self._roller_sweep_thread = threading.Thread(target=self._run_roller_sweep,
+                                                         name="roller-task-3", daemon=True)
+            self._roller_sweep_thread.start()
+
+    def _run_roller_sweep(self) -> None:
+        controller = self._roller_sweep
+        if controller is None:
+            return
+        try:
+            controller.run()
+        except Exception as error:
+            LOG.exception("task 3 direct roller controller failed")
+            self.set_ui_error(str(error))
+            with self.action_lock:
+                if self.action_dispatcher.active_action == ActionId.ROLLER_SWEEP:
+                    self.action_dispatcher.fail("direct_roller_failed")
+
+    def _sync_roller_sweep_status(self) -> None:
+        controller = self._roller_sweep
+        if controller is None:
+            return
+        phase = controller.sequence_state
+        target = controller.sequence_target_mm
+        if phase == "COMPLETE":
+            if self.action_dispatcher.active_action == ActionId.ROLLER_SWEEP:
+                self.action_dispatcher.complete("negative_target_stable")
+            return
+        self.action_dispatcher.set_direct_roller_progress(phase, target)
+
+    def _stop_roller_sweep(self) -> bool:
+        controller = self._roller_sweep
+        thread = self._roller_sweep_thread
+        if controller is None:
+            return True
+        controller.stop_event.set()
+        if thread is not None and thread.is_alive() and thread is not threading.current_thread():
+            thread.join(timeout=2.0)
+        if thread is not None and thread.is_alive():
+            return False
+        self._roller_sweep = None
+        self._roller_sweep_thread = None
+        return True
+
+    def _roller_sweep_active(self) -> bool:
+        thread = self._roller_sweep_thread
+        return thread is not None and thread.is_alive()
 
     def _request_roller_home(self, parameters: Dict[str, Any] | None, *, source: str,
                              now_ms: int | None) -> None:

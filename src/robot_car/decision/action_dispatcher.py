@@ -158,7 +158,7 @@ class ActionDispatcher:
             self.reason = "timeout"
             self.active_action = None
             return
-        if self.active_action != ActionId.ROLLER_SWEEP:
+        if self.active_action != ActionId.ROLLER_SWEEP or self.phase.startswith("DIRECT_"):
             return
         error = self.ball_error_mm
         if error is None:
@@ -210,6 +210,13 @@ class ActionDispatcher:
         self.deadline_ms = None
         self.target_mm = None
         self._stable_since_ms = None
+
+    def set_direct_roller_progress(self, phase: str, target_mm: float) -> None:
+        """Expose the direct-CAN task-3 sequence without running M0 semantics."""
+        if self.active_action != ActionId.ROLLER_SWEEP or self.status != "RUNNING":
+            return
+        self.phase = f"DIRECT_{phase}"
+        self.target_mm = target_mm
 
     def motion_mode(self) -> Optional[MotionMode]:
         if self.status != "RUNNING" or self.active_action is None:
