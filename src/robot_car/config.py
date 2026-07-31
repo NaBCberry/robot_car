@@ -40,6 +40,8 @@ SAFE_DEFAULTS: Dict[str, Any] = {
         "balance": {"enabled": False, "output_only": False, "require_feedback": True,
                     "state_timeout_ms": 120},
         "roller_home": {"enabled": False, "timeout_ms": 30000},
+        "status_led": {"enabled": False, "device": "/dev/spidev1.0", "count": 8,
+                       "brightness": 0.01, "refresh_hz": 8},
         "actions": {"enabled": True, "default_timeout_ms": 30000},
     },
     "transport": {
@@ -162,6 +164,15 @@ def _validate_safe(config: Dict[str, Any]) -> None:
         raise ValueError("vehicle.roller_home.enabled must be a YAML boolean")
     if not 0 < int(roller_home.get("timeout_ms", 0)) <= 0xFFFFFFFF:
         raise ValueError("vehicle.roller_home.timeout_ms must be positive")
+    status_led = vehicle.get("status_led", {})
+    if not isinstance(status_led.get("enabled", False), bool):
+        raise ValueError("vehicle.status_led.enabled must be a YAML boolean")
+    if not 1 <= int(status_led.get("count", 0)) <= 1024:
+        raise ValueError("vehicle.status_led.count must be between 1 and 1024")
+    if not 0 < float(status_led.get("brightness", 0)) <= 0.01:
+        raise ValueError("vehicle.status_led.brightness must be between 0 and 0.01")
+    if not 1 <= float(status_led.get("refresh_hz", 0)) <= 30:
+        raise ValueError("vehicle.status_led.refresh_hz must be between 1 and 30")
     actions = vehicle.get("actions", {})
     if not isinstance(actions.get("enabled", True), bool):
         raise ValueError("vehicle.actions.enabled must be a YAML boolean")

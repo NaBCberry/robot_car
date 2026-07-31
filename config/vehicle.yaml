@@ -34,6 +34,13 @@ vehicle:
     # ACTION_REQUEST action_id=1 is rejected unless this and roller_control.yaml enabled are true.
     enabled: false
     timeout_ms: 30000
+  status_led:
+    # Eight WS2812 pixels on SPI1 MOSI (40-pin header pin 19), reserved for status only.
+    enabled: true
+    device: /dev/spidev1.0
+    count: 8
+    brightness: 0.01       # Minimum visible level; never exceed 1% from this controller.
+    refresh_hz: 8
   actions:
     # Requests are accepted from UART and TUI, then pass through the safety watchdogs.
     enabled: true
