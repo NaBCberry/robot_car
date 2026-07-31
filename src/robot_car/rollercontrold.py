@@ -24,7 +24,7 @@ LOG = logging.getLogger(__name__)
 
 class RollerControlDaemon:
     def __init__(self, app_config: dict, control_config: dict, *, armed: bool,
-                 dry_run: bool, target_mm: float | None) -> None:
+                 dry_run: bool, target_mm: float | None, telemetry_hz: float) -> None:
         self.app_config = app_config
         self.control_config = control_config
         self.armed = armed and bool(control_config.get("enabled", False))
@@ -63,6 +63,15 @@ class RollerControlDaemon:
         self.command_interval_s = 1.0 / float(motor.get("command_hz", 40))
         self.state_timeout_ms = int(control_config.get("state_timeout_ms", 120))
         self.target_mm = float(control_config.get("target_mm", 0) if target_mm is None else target_mm)
+        if telemetry_hz < 0 or telemetry_hz > 20:
+            raise ValueError("telemetry_hz must be in 0..20")
+        self.telemetry_interval_s = 0.0 if telemetry_hz == 0 else 1.0 / telemetry_hz
+        self.feedback_period_ms = 0 if telemetry_hz == 0 else max(50, round(1000.0 / telemetry_hz))
+        self.next_telemetry_s = 0.0
+        self.motor_position_deg: float | None = None
+        self.motor_home_status: int | None = None
+        self.motor_status: int | None = None
+        self.feedback_enabled = False
         self.subscriber = VisionEventSubscriber(app_config["runtime"]["vision_socket"])
         self.ball: BallState | None = None
         self.last_command_s = 0.0
@@ -72,6 +81,9 @@ class RollerControlDaemon:
         self.sensor.open()
         self.sensor.configure()
         self.actuator.open()
+        if self.telemetry_interval_s and not self.dry_run:
+            self.actuator.configure_feedback("home-and-status", self.feedback_period_ms)
+            self.feedback_enabled = True
         if self.armed:
             self.actuator.enable()
         LOG.info("roller CAN controller started; armed=%s dry_run=%s target_mm=%.1f",
@@ -79,6 +91,7 @@ class RollerControlDaemon:
         try:
             while not self.stop_event.is_set():
                 self._receive_event()
+                self._receive_motor_feedback()
                 now_s = time.monotonic()
                 if now_s - self.last_command_s >= self.command_interval_s:
                     estimate = self.pitch.update(self.sensor.sample())
@@ -86,6 +99,9 @@ class RollerControlDaemon:
                     self.last_command_s = estimate.timestamp_s
                 self.stop_event.wait(0.001)
         finally:
+            if self.feedback_enabled:
+                self.actuator.configure_feedback("position", 0)
+                self.actuator.configure_feedback("home-and-status", 0)
             self.subscriber.close()
             self.actuator.close()
             self.sensor.close()
@@ -120,6 +136,33 @@ class RollerControlDaemon:
         LOG.debug("ball=%.1f mm v=%.1f mm/s a=%.1f mm/s2 tube=%.2f deg target=%.2f deg motor=%.2f deg",
                   ball.position_mm, ball.velocity_mm_s, ball.acceleration_mm_s2, tube_angle_deg,
                   command.target_tube_angle_deg, command.target_motor_angle_deg)
+        if self.telemetry_interval_s and now_s >= self.next_telemetry_s:
+            self.next_telemetry_s = now_s + self.telemetry_interval_s
+            try:
+                self.motor_position_deg = self.actuator.read_position_deg(timeout_s=0.05)
+            except RuntimeError:
+                self.motor_position_deg = None
+            position = "-" if self.motor_position_deg is None else f"{self.motor_position_deg:.2f}"
+            status = "-" if self.motor_status is None else f"0x{self.motor_status:02X}"
+            home = "-" if self.motor_home_status is None else f"0x{self.motor_home_status:02X}"
+            LOG.info("telemetry ball=%.1fmm v=%.1fmm/s tube=%.2fdeg target=%.2fdeg cmd=%.2fdeg "
+                     "motor=%sdeg status=%s home=%s",
+                     ball.position_mm, ball.velocity_mm_s, tube_angle_deg,
+                     command.target_tube_angle_deg, command.target_motor_angle_deg,
+                     position, status, home)
+
+    def _receive_motor_feedback(self) -> None:
+        if not self.feedback_enabled:
+            return
+        for _ in range(4):
+            feedback = self.actuator.receive_feedback()
+            if feedback is None:
+                return
+            item, value = feedback
+            if item == "position":
+                self.motor_position_deg = float(value)
+            else:
+                self.motor_home_status, self.motor_status = value
 
     def _safe_stop(self, reason: str) -> None:
         if self.last_safe:
@@ -137,6 +180,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--target-mm", type=float, default=None)
     parser.add_argument("--arm", action="store_true", help="allow the configured motor to be enabled")
     parser.add_argument("--dry-run", action="store_true", help="print Y42 CAN frames without sending them")
+    parser.add_argument("--telemetry-hz", type=float, default=0,
+                        help="log vision/IMU/Y42 feedback at 0..20 Hz; 0 disables feedback")
     return parser.parse_args()
 
 
@@ -148,7 +193,8 @@ def main() -> int:
         configure_logging("rollercontrold", app_config["runtime"].get("log_level", "INFO"), paths["logs"])
         control_path = args.control_config or str(Path(args.config_dir) / "roller_control.yaml")
         daemon = RollerControlDaemon(app_config, load_roller_control(control_path), armed=args.arm,
-                                     dry_run=args.dry_run, target_mm=args.target_mm)
+                                     dry_run=args.dry_run, target_mm=args.target_mm,
+                                     telemetry_hz=args.telemetry_hz)
     except Exception as error:
         logging.basicConfig(level=logging.INFO)
         LOG.error("safe startup failure: %s", error)

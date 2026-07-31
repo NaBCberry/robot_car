@@ -44,6 +44,8 @@ class Y42Actuator:
         self.payload_sender = payload_sender
         self.enabled = False
 
+    _FEEDBACK_CODES = {"position": 0x36, "home-and-status": 0x3C}
+
     def open(self) -> None:
         self.driver.open()
 
@@ -131,6 +133,31 @@ class Y42Actuator:
 
     def read_motor_status(self, timeout_s: float = 2.0) -> int:
         return self._read("status", 0x3A, 3, timeout_s)[1]
+
+    def configure_feedback(self, item: str, period_ms: int) -> None:
+        """Configure Y42 periodic status frames according to protocol section 5.2."""
+        if item not in self._FEEDBACK_CODES or not 0 <= period_ms <= 0xFFFF:
+            raise ValueError("Y42 feedback configuration is invalid")
+        payload = bytes((0x11, 0x18, self._FEEDBACK_CODES[item])) + period_ms.to_bytes(2, "big") + b"\x6B"
+        self.payload_sender(self.driver, self.address, payload, self.packet_gap_ms)
+
+    def receive_feedback(self, timeout_s: float = 0.001) -> tuple[str, float | int | tuple[int, int]] | None:
+        """Receive one periodic position or combined-status frame without issuing a request."""
+        if timeout_s <= 0 or getattr(self.driver, "dry_run", False):
+            return None
+        received = self.driver.receive(timeout_s)
+        if received is None:
+            return None
+        can_id, data, extended = received
+        if not (extended and can_id >> 8 == self.address and data[-1:] == b"\x6B"):
+            return None
+        if len(data) == 7 and data[0] == self._FEEDBACK_CODES["position"]:
+            raw_position = int.from_bytes(data[2:6], "big")
+            position = raw_position * 360.0 / 65536.0 if self.firmware == "emm" else raw_position / 10.0
+            return "position", -position if data[1] else position
+        if len(data) == 4 and data[0] == self._FEEDBACK_CODES["home-and-status"]:
+            return "home-and-status", (data[1], data[2])
+        return None
 
     def close(self, *, disable: bool = True) -> None:
         try:

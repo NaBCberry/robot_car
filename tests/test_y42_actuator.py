@@ -212,6 +212,25 @@ class Y42ActuatorTests(unittest.TestCase):
                                payload_sender=lambda *_: None)
         self.assertEqual(actuator.read_motor_status(), 0x01)
 
+    def test_configures_and_decodes_periodic_emm_feedback(self):
+        sent = []
+        driver = ReadingDriver("can0", False, responses=[
+            (0x0100, bytes((0x36, 1, 0, 0, 0x10, 0x00, 0x6B)), True),
+            (0x0100, bytes((0x3C, 0x03, 0x01, 0x6B)), True),
+        ])
+        actuator = Y42Actuator(interface="can0", address=1, firmware="emm",
+                               driver_factory=lambda *_: driver,
+                               payload_builder=lambda arguments: (arguments.address, b"payload"),
+                               payload_sender=lambda *args: sent.append(args))
+
+        actuator.configure_feedback("position", 100)
+        actuator.configure_feedback("home-and-status", 100)
+
+        self.assertEqual(sent[0][2], bytes((0x11, 0x18, 0x36, 0, 100, 0x6B)))
+        self.assertEqual(sent[1][2], bytes((0x11, 0x18, 0x3C, 0, 100, 0x6B)))
+        self.assertEqual(actuator.receive_feedback(), ("position", -22.5))
+        self.assertEqual(actuator.receive_feedback(), ("home-and-status", (0x03, 0x01)))
+
     def test_reports_rejected_confirmed_position_command(self):
         driver = ReadingDriver("can0", False, responses=[
             (0x0100, bytes((0xFD, 0xE2, 0x6B)), True),
