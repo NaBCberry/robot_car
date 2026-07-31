@@ -1,6 +1,6 @@
 vehicle:
-  # This gate is independent of transport.enabled and defaults safe.
-  control_enabled: false
+  # Allow the MSPM0 to execute valid semantic motion commands.
+  control_enabled: true
   initial_mode: IDLE
   default_valid_for_ms: 200
   heartbeat_hz: 20
@@ -24,6 +24,6 @@ vehicle:
   balance:
     # Top-view roller-balance state. The MSPM0 owns the high-rate rocker PID.
     enabled: true
-    # Send only error_mm while forcing enabled=0 for UART bring-up.
-    output_only: true
+    # Permit fresh balance states to set enabled=1 at the UART gateway.
+    output_only: false
     state_timeout_ms: 120
