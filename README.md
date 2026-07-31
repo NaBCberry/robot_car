@@ -45,6 +45,7 @@ robot_car/
 │   ├── send_protocol_frame.sh          # 显式确认后向指定 UART 发送一帧协议测试数据
 │   ├── run_roller_balance_uart.sh      # 顶置滚珠位置偏差的安全 UART 输出入口
 │   ├── run_roller_balance_can.sh       # 独立的 ICM42688/Y42 直接 CAN 控制入口，默认不使能
+│   ├── calibrate_roller_control.sh     # 交互采集 Y42 软限位和曲轴-水管标定表
 │   ├── probe_icm42688.sh                # 只读探测 SPI 片选上的 ICM42688 身份寄存器
 │   ├── monitor_icm42688.sh              # 只读输出 IMU 原始值和俯仰角，不打开 CAN
 │   ├── capture_protocol_frames.py       # 协议帧抓包和解析测试工具

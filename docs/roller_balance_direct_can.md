@@ -37,6 +37,32 @@ flowchart LR
 曲轴在安全行程内必须单调；配置中示例的 `[-8,-80] [0,0] [8,80]` 只是占位，绝不能直接
 用于真实设备。
 
+## 电机软限位与曲轴标定
+
+控制器和 Y42 CAN 发送层都会将目标截断到 `motor.soft_limit_min_deg` 与
+`motor.soft_limit_max_deg`。当前 `-80°..80°` 只与占位曲轴表一致，不能视为实际机械行程。
+完成一次标定后，才允许将 `enabled` 设为 `true`。
+
+先停掉任何 `run_roller_balance_can.sh` 进程，松开曲轴连接轴，让电机不带机构负载，然后运行：
+
+```bash
+./scripts/calibrate_roller_control.sh limits --margin-deg 2 --apply
+```
+
+脚本会先向 Y42 发送 `disable` 松轴；分别手动转到两个安全端（不要顶住硬限位），每次输入
+`CAPTURE` 后读取编码器位置，扣除 `2°` 安全余量，并在明确传入 `--apply` 时写入软限位。
+
+重新锁紧曲轴、清空水管内钢球并确认急停有效后，先将 `roller_control.yaml` 的 `enabled` 改为
+`true`。以下命令以 `5 RPM`、7 个采样点移动，每点静置并用 IMU 平均水管角，自动生成
+`motor_deg_by_tube_angle`：
+
+```bash
+./scripts/calibrate_roller_control.sh map --arm --apply
+```
+
+若测得曲轴行程不是单调的一对一关系，脚本会拒绝写入映射；应缩小软限位到单调工作段后重新采集。
+标定完成后把 `enabled` 恢复为 `false`，先执行 `run_roller_balance_can.sh --dry-run` 核对待发 CAN 帧。
+
 ## ICM42688 接线确认
 
 若模块接在 SPI1 的 `CSN1`，当前目标就是 `spi1.1`；原厂数据手册 `DS-000347` 支持 SPI 模式 0 或 3，当前配置使用模式 3。传感器必须装在会随摆杆转动的部件上，
