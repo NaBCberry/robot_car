@@ -32,11 +32,18 @@ class ActionDispatcherTests(unittest.TestCase):
             dispatcher.request(ActionId.LINE_LAP_BALANCE_TARGET, now_ms=0)
 
     def test_competition_task_ids_use_task_numbers(self):
+        self.assertEqual(int(ActionId.ROLLER_HOME), 1)
         self.assertEqual(int(ActionId.LINE_LAP_TO_A), 2)
         self.assertEqual(int(ActionId.ROLLER_SWEEP), 3)
         self.assertEqual(int(ActionId.LINE_TO_B_BALANCE_CENTER), 4)
         self.assertEqual(int(ActionId.LINE_LAP_BALANCE_CENTER), 5)
         self.assertEqual(int(ActionId.LINE_LAP_BALANCE_TARGET), 6)
+
+    def test_motor_home_has_no_vehicle_motion_mode(self):
+        dispatcher = ActionDispatcher({})
+        dispatcher.request(ActionId.ROLLER_HOME, now_ms=1000)
+        self.assertEqual(dispatcher.phase, "MOTOR_HOME")
+        self.assertIsNone(dispatcher.motion_mode())
 
     def test_m0_checkpoint_completes_lap_action(self):
         dispatcher = ActionDispatcher({})

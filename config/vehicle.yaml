@@ -29,6 +29,11 @@ vehicle:
     # M0 currently receives only; visual-state timeout still sends a safe frame.
     require_feedback: false
     state_timeout_ms: 120
+  roller_home:
+    # Keep false until this process is the only Y42 CAN controller.
+    # ACTION_REQUEST action_id=1 is rejected unless this and roller_control.yaml enabled are true.
+    enabled: false
+    timeout_ms: 30000
   actions:
     # Requests are accepted from UART and TUI, then pass through the safety watchdogs.
     enabled: true

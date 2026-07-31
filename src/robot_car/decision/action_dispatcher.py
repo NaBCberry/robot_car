@@ -13,6 +13,7 @@ from robot_car.protocol.messages import MotionMode
 
 class ActionId(IntEnum):
     STOP = 0
+    ROLLER_HOME = 1
     # Match the five numbered tasks in H.pdf so TUI/UART action IDs are
     # directly recognizable at the competition site.
     LINE_LAP_TO_A = 2
@@ -95,7 +96,10 @@ class ActionDispatcher:
         self._stable_since_ms = None
         self.reason = ""
         self.target_mm = None
-        if action == ActionId.ROLLER_SWEEP:
+        if action == ActionId.ROLLER_HOME:
+            self.phase = "MOTOR_HOME"
+            self.deadline_ms = now + int(parameters.get("timeout_ms", 30000))
+        elif action == ActionId.ROLLER_SWEEP:
             self.phase = "TO_POSITIVE"
             self.deadline_ms = now + int(parameters.get("timeout_ms", 5000))
             self.target_mm = float(parameters.get("positive_mm", 50.0))
@@ -197,8 +201,20 @@ class ActionDispatcher:
         self.phase = ""
         self.deadline_ms = None
 
+    def fail(self, reason: str, now_ms: Optional[int] = None) -> None:
+        """Finish the active action as failed without leaving a motion request live."""
+        self.status = "FAILED"
+        self.reason = reason
+        self.active_action = None
+        self.phase = ""
+        self.deadline_ms = None
+        self.target_mm = None
+        self._stable_since_ms = None
+
     def motion_mode(self) -> Optional[MotionMode]:
         if self.status != "RUNNING" or self.active_action is None:
+            return None
+        if self.active_action == ActionId.ROLLER_HOME:
             return None
         if self.active_action == ActionId.LINE_LAP_TO_A:
             return MotionMode.LINE_FOLLOW

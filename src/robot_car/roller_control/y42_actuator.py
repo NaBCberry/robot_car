@@ -117,7 +117,8 @@ class Y42Actuator:
                    acceleration=acceleration_rpm_s,
                    position=self._degrees_to_pulses(abs(motor_angle_deg)), mode="relative-target")
 
-    def home_absolute_zero(self, *, wait: bool = False, timeout_s: float = 30.0) -> float | None:
+    def home_absolute_zero(self, *, wait: bool = False, confirm: bool = False,
+                           timeout_s: float = 30.0) -> float | None:
         """Start absolute-zero homing and optionally wait for completion.
 
         Y42 acknowledges the 0x9A command separately from the physical
@@ -127,7 +128,8 @@ class Y42Actuator:
         """
         if timeout_s <= 0:
             raise ValueError("home timeout must be positive")
-        self._send("home", mode=4, confirm=wait, confirm_timeout_s=min(timeout_s, 5.0))
+        self._send("home", mode=4, confirm=confirm or wait,
+                   confirm_timeout_s=min(timeout_s, 5.0))
         if not wait:
             return None
         print("已发送回零命令，等待 Y42 状态...", flush=True)
@@ -153,6 +155,10 @@ class Y42Actuator:
                 return position
             time.sleep(0.1)
         raise RuntimeError("Y42 absolute home timed out after %.1fs" % timeout_s)
+
+    def cancel_home(self) -> None:
+        """Interrupt an active Y42 homing operation (protocol command 9C 48)."""
+        self._send("home-stop")
 
     def read_position_deg(self, timeout_s: float = 2.0) -> float:
         return self._read_position_deg("position", 0x36, timeout_s)

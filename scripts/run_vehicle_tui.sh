@@ -3,7 +3,7 @@ set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$project_root"
-export PYTHONPATH="$project_root/src${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="/userdata/rdkstudio/projects:$project_root/src${PYTHONPATH:+:$PYTHONPATH}"
 
 config_dir="${CONFIG_DIR:-config}"
 vision_pid=""

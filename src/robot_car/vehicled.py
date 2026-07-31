@@ -12,11 +12,12 @@ from typing import Any, Dict
 
 from robot_car.config import ensure_runtime_dirs, load_config
 from robot_car.decision.control_arbiter import ControlArbiter
-from robot_car.decision.action_dispatcher import ActionDispatcher
+from robot_car.decision.action_dispatcher import ActionDispatcher, ActionId
 from robot_car.decision.motion_target import MotionTarget
 from robot_car.decision.state_machine import VehicleStateMachine, monotonic_ms
 from robot_car.ipc.vision_socket import VisionEventSubscriber
 from robot_car.observability.logging import configure_logging
+from robot_car.roller_control.homing import HomeCancelled, home_from_config_file
 from robot_car.vehicle_link.can_transport import CanTransport
 from robot_car.vehicle_link.fake_transport import FakeTransport
 from robot_car.vehicle_link.gateway import VehicleGateway
@@ -42,7 +43,8 @@ def build_transport(config: Dict[str, Any], override: str | None) -> Transport:
 
 
 class VehicleDaemon:
-    def __init__(self, config: Dict[str, Any], transport: Transport) -> None:
+    def __init__(self, config: Dict[str, Any], transport: Transport,
+                 roller_control_path: str | Path = "config/roller_control.yaml") -> None:
         self.config = config
         self.transport = transport
         self.gateway = VehicleGateway(transport, config["vehicle"])
@@ -50,6 +52,9 @@ class VehicleDaemon:
         self.control_arbiter = ControlArbiter(config["vehicle"])
         self.action_dispatcher = ActionDispatcher(config["vehicle"])
         self.action_lock = threading.Lock()
+        self.roller_control_path = Path(roller_control_path)
+        self._roller_home_thread: threading.Thread | None = None
+        self._roller_home_cancel = threading.Event()
         self.ui_error = ""
         self._last_action_report = None
         self.subscriber = VisionEventSubscriber(config["runtime"]["vision_socket"])
@@ -134,7 +139,10 @@ class VehicleDaemon:
                     with self.action_lock:
                         mode = self.action_dispatcher.motion_mode()
                         action_target_mm = self.action_dispatcher.target_mm
-                    if mode is not None and self.state_machine.state.value not in {
+                    if self._roller_home_active():
+                        fallback = MotionTarget(enabled=False, valid_for_ms=int(
+                            self.config["vehicle"].get("default_valid_for_ms", 200)))
+                    elif mode is not None and self.state_machine.state.value not in {
                             "FAILSAFE", "E_STOP", "FAULT"}:
                         fallback = MotionTarget(mode=mode,
                                                 enabled=bool(self.config["vehicle"].get(
@@ -154,10 +162,63 @@ class VehicleDaemon:
 
     def request_action(self, action_id: int, parameters: Dict[str, Any] | None = None,
                        *, source: str = "tui", now_ms: int | None = None) -> None:
+        if int(action_id) == int(ActionId.STOP):
+            self._cancel_roller_home()
+        if int(action_id) == int(ActionId.ROLLER_HOME):
+            self._request_roller_home(parameters, source=source, now_ms=now_ms)
+            return
         with self.action_lock:
             self.action_dispatcher.request(
                 action_id, parameters, source=source, now_ms=now_ms,
                 current_ball_error_mm=self.action_dispatcher.ball_error_mm)
+
+    def _request_roller_home(self, parameters: Dict[str, Any] | None, *, source: str,
+                             now_ms: int | None) -> None:
+        home_config = self.config["vehicle"].get("roller_home", {})
+        if not bool(home_config.get("enabled", False)):
+            raise RuntimeError("vehicle.roller_home.enabled is false")
+        parameters = dict(parameters or {})
+        parameters.setdefault("timeout_ms", int(home_config.get("timeout_ms", 30000)))
+        with self.action_lock:
+            if self._roller_home_thread is not None and self._roller_home_thread.is_alive():
+                raise RuntimeError("roller motor home is already in progress")
+            self.action_dispatcher.request(ActionId.ROLLER_HOME, parameters, source=source,
+                                           now_ms=now_ms,
+                                           current_ball_error_mm=self.action_dispatcher.ball_error_mm)
+            self._roller_home_cancel.clear()
+            self._roller_home_thread = threading.Thread(
+                target=self._run_roller_home, args=(int(parameters["timeout_ms"]),),
+                name="roller-home", daemon=True)
+            self._roller_home_thread.start()
+
+    def _run_roller_home(self, timeout_ms: int) -> None:
+        try:
+            home_from_config_file(self.roller_control_path, timeout_ms,
+                                  cancel_event=self._roller_home_cancel)
+        except HomeCancelled:
+            LOG.info("roller motor home cancelled")
+        except Exception as error:
+            LOG.exception("roller motor home failed")
+            self.set_ui_error(str(error))
+            with self.action_lock:
+                if self.action_dispatcher.active_action == ActionId.ROLLER_HOME:
+                    self.action_dispatcher.fail("motor_home_failed")
+        else:
+            with self.action_lock:
+                if self.action_dispatcher.active_action == ActionId.ROLLER_HOME:
+                    self.action_dispatcher.complete("motor_home_complete")
+
+    def _cancel_roller_home(self) -> None:
+        with self.action_lock:
+            active = (self.action_dispatcher.active_action == ActionId.ROLLER_HOME
+                      and self.action_dispatcher.status == "RUNNING")
+            if active:
+                self._roller_home_cancel.set()
+
+    def _roller_home_active(self) -> bool:
+        with self.action_lock:
+            return (self.action_dispatcher.active_action == ActionId.ROLLER_HOME
+                    and self.action_dispatcher.status == "RUNNING")
 
     def set_ui_error(self, value: str) -> None:
         self.ui_error = value
@@ -185,7 +246,8 @@ def main() -> int:
         configure_logging("vehicled", "WARNING" if args.quiet else
                           config["runtime"].get("log_level", "INFO"), paths["logs"],
                           console=not args.tui)
-        daemon = VehicleDaemon(config, build_transport(config, args.transport))
+        control_path = Path(args.config_dir) / "roller_control.yaml"
+        daemon = VehicleDaemon(config, build_transport(config, args.transport), control_path)
     except Exception as error:
         logging.basicConfig(level=logging.INFO)
         LOG.error("safe startup failure: %s", error)
