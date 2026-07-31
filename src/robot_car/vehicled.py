@@ -183,7 +183,8 @@ def main() -> int:
         config = load_config(args.config_dir)
         paths = ensure_runtime_dirs(config)
         configure_logging("vehicled", "WARNING" if args.quiet else
-                          config["runtime"].get("log_level", "INFO"), paths["logs"])
+                          config["runtime"].get("log_level", "INFO"), paths["logs"],
+                          console=not args.tui)
         daemon = VehicleDaemon(config, build_transport(config, args.transport))
     except Exception as error:
         logging.basicConfig(level=logging.INFO)

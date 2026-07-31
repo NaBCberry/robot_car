@@ -7,6 +7,8 @@ export PYTHONPATH="$project_root/src${PYTHONPATH:+:$PYTHONPATH}"
 
 config_dir="${CONFIG_DIR:-config}"
 vision_pid=""
+vision_log_dir="${VISION_LOG_DIR:-/userdata/robot-car/logs}"
+mkdir -p "$vision_log_dir"
 
 cleanup() {
     if [[ -n "$vision_pid" ]]; then
@@ -16,7 +18,10 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-python3 -m robot_car.visiond --config-dir "$config_dir" &
+# Keep model/BPU output out of the curses terminal; visiond also writes its
+# structured log to the same runtime log directory.
+python3 -m robot_car.visiond --config-dir "$config_dir" \
+    >"$vision_log_dir/visiond-console.log" 2>&1 &
 vision_pid=$!
 
 python3 -m robot_car.vehicled --config-dir "$config_dir" --tui "$@"
