@@ -17,14 +17,14 @@ import sys
 from robot_car.roller_control.icm42688 import Icm42688
 
 chip_select = int(sys.argv[1])
-sensor = Icm42688(1, chip_select, speed_hz=100_000, mode=0)
+sensor = Icm42688(1, chip_select, speed_hz=100_000, mode=3)
 try:
     sensor.open()
 except RuntimeError as error:
     print(error)
     raise SystemExit(2)
 else:
-    print(f"ICM42688 detected on spi1.{chip_select}: WHO_AM_I=0x47")
+    print(f"ICM42688 detected on spi1.{chip_select}: WHO_AM_I=0x6A")
 finally:
     sensor.close()
 PY

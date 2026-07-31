@@ -8,12 +8,14 @@ import time
 from typing import Callable, Protocol
 
 
-WHO_AM_I = 0x75
-WHO_AM_I_ICM42688 = 0x47
-PWR_MGMT0 = 0x4E
-GYRO_CONFIG0 = 0x4F
-ACCEL_CONFIG0 = 0x50
-TEMP_DATA1 = 0x1D
+WHO_AM_I = 0x01
+WHO_AM_I_ICM42688 = 0x6A
+PWR_CTRL = 0x7D
+GYRO_CONFIG = 0x42
+ACCEL_CONFIG = 0x40
+GYRO_RANGE = 0x43
+ACCEL_RANGE = 0x41
+ACC_XH = 0x0C
 
 
 class SpiDevice(Protocol):
@@ -43,7 +45,7 @@ class Icm42688:
     """Read the ICM42688 WHO_AM_I and raw accel/gyro samples over SPI."""
 
     def __init__(self, bus: int, chip_select: int, *, speed_hz: int = 1_000_000,
-                 mode: int = 0, spi_factory: Callable[[], SpiDevice] | None = None,
+                 mode: int = 3, spi_factory: Callable[[], SpiDevice] | None = None,
                  monotonic: Callable[[], float] = time.monotonic) -> None:
         self.bus = bus
         self.chip_select = chip_select
@@ -71,28 +73,31 @@ class Icm42688:
         if identity != WHO_AM_I_ICM42688:
             spi.close()
             raise RuntimeError(
-                "ICM42688 not found on spi%d.%d: WHO_AM_I=0x%02X (expected 0x47)"
+                "ICM42688 not found on spi%d.%d: WHO_AM_I=0x%02X (expected 0x6A)"
                 % (self.bus, self.chip_select, identity))
         self.spi = spi
 
     def configure(self) -> None:
-        """Enable accel and gyro in low-noise mode at 1 kHz."""
+        """Enable ±4 g accel and ±500 dps gyro at 100 Hz."""
         spi = self._require_spi()
-        self.write_register(GYRO_CONFIG0, 0x46, spi)
-        self.write_register(ACCEL_CONFIG0, 0x46, spi)
-        self.write_register(PWR_MGMT0, 0x0F, spi)
+        self.write_register(PWR_CTRL, 0x0E, spi)
+        time.sleep(0.01)
+        self.write_register(ACCEL_RANGE, 0x01, spi)
+        self.write_register(GYRO_RANGE, 0x02, spi)
+        self.write_register(ACCEL_CONFIG, 0xA8, spi)
+        self.write_register(GYRO_CONFIG, 0xA8, spi)
 
     def sample(self) -> ImuSample:
         spi = self._require_spi()
-        values = spi.xfer2([TEMP_DATA1 | 0x80] + [0] * 14)
-        if len(values) != 15:
+        values = spi.xfer2([self._read_command(ACC_XH)] + [0] * 12)
+        if len(values) != 13:
             raise RuntimeError("ICM42688 returned an incomplete sample")
-        decoded = struct.unpack(">hhhhhhh", bytes(values[1:]))
-        return ImuSample(self.monotonic(), *decoded)
+        decoded = struct.unpack(">hhhhhh", bytes(values[1:]))
+        return ImuSample(self.monotonic(), 0, *decoded[0:3], *decoded[3:6])
 
     @staticmethod
     def read_register(address: int, spi: SpiDevice) -> int:
-        values = spi.xfer2([address | 0x80, 0])
+        values = spi.xfer2([Icm42688._read_command(address), 0])
         if len(values) != 2:
             raise RuntimeError("ICM42688 returned an incomplete register read")
         return values[1]
@@ -101,7 +106,15 @@ class Icm42688:
     def write_register(address: int, value: int, spi: SpiDevice) -> None:
         if not 0 <= value <= 0xFF:
             raise ValueError("ICM42688 register value must fit uint8")
-        spi.xfer2([address & 0x7F, value])
+        if not 0 <= address <= 0x7F:
+            raise ValueError("ICM42688 register address must fit uint7")
+        spi.xfer2([address << 1, value])
+
+    @staticmethod
+    def _read_command(address: int) -> int:
+        if not 0 <= address <= 0x7F:
+            raise ValueError("ICM42688 register address must fit uint7")
+        return (address << 1) | 1
 
     def close(self) -> None:
         if self.spi is not None:

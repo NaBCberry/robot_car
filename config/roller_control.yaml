@@ -8,7 +8,7 @@ imu:
   spi_bus: 1
   chip_select: 1
   speed_hz: 1000000
-  mode: 0
+  mode: 3
   # Replace with the axes/signs measured after mounting on the moving pipe.
   slope_accel_axis: x
   gravity_accel_axis: z
