@@ -19,9 +19,9 @@ imu:
   gyro_sign: 1
   gyro_weight: 0.98
   # Set this to the raw pitch reported while the pipe is at its mechanical zero.
-  pitch_zero_offset_deg: 0.0
+  pitch_zero_offset_deg: 1.027
   # Set this to the selected gyro-axis average while the pipe is stationary.
-  gyro_bias_raw: 0.0
+  gyro_bias_raw: 103.720
 
 motor:
   can_interface: can0
