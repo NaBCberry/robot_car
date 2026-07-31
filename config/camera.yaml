@@ -20,10 +20,61 @@ camera:
     - 1.0
     roller_balance:
       roi_xyxy:
-      - 28.64
-      - 301.4
-      - 1240.18
-      - 360.23
-      center_x_px: 639.81
-      mm_per_pixel: 0.20635
+      - 16.64
+      - 300.2
+      - 1248.58
+      - 359.03
+      center_x_px: 641.01
+      mm_per_pixel: 0.202931
       axis_direction: 1
+      axis_points:
+      - position_mm: -120
+        pixel_x: 35.85
+      - position_mm: -110
+        pixel_x: 93.48
+      - position_mm: -100
+        pixel_x: 143.91
+      - position_mm: -90
+        pixel_x: 195.55
+      - position_mm: -80
+        pixel_x: 247.18
+      - position_mm: -70
+        pixel_x: 292.8
+      - position_mm: -60
+        pixel_x: 343.23
+      - position_mm: -50
+        pixel_x: 390.06
+      - position_mm: -40
+        pixel_x: 444.1
+      - position_mm: -30
+        pixel_x: 492.12
+      - position_mm: -20
+        pixel_x: 541.35
+      - position_mm: -10
+        pixel_x: 594.19
+      - position_mm: 0
+        pixel_x: 641.01
+      - position_mm: 10
+        pixel_x: 687.84
+      - position_mm: 20
+        pixel_x: 741.88
+      - position_mm: 30
+        pixel_x: 787.5
+      - position_mm: 40
+        pixel_x: 833.13
+      - position_mm: 50
+        pixel_x: 881.16
+      - position_mm: 60
+        pixel_x: 929.19
+      - position_mm: 70
+        pixel_x: 976.02
+      - position_mm: 80
+        pixel_x: 1025.25
+      - position_mm: 90
+        pixel_x: 1070.87
+      - position_mm: 100
+        pixel_x: 1116.5
+      - position_mm: 110
+        pixel_x: 1163.33
+      - position_mm: 120
+        pixel_x: 1213.76
