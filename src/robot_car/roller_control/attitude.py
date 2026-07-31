@@ -22,7 +22,8 @@ class PitchEstimator:
                  slope_accel_sign: int = 1, gravity_accel_sign: int = 1,
                  gyro_sign: int = 1, gyro_lsb_per_dps: float = 65.5,
                  accel_lsb_per_g: float = 8192.0, gyro_weight: float = 0.98,
-                 pitch_zero_offset_deg: float = 0.0, gyro_bias_raw: float = 0.0) -> None:
+                 pitch_zero_offset_deg: float = 0.0, gyro_bias_raw: float = 0.0,
+                 gyro_correction_time_constant_s: float | None = None) -> None:
         self.slope_accel_axis = self._axis(slope_accel_axis)
         self.gravity_accel_axis = self._axis(gravity_accel_axis)
         self.gyro_axis = self._axis(gyro_axis)
@@ -36,6 +37,10 @@ class PitchEstimator:
             raise ValueError("pitch estimator parameters are invalid")
         if not math.isfinite(pitch_zero_offset_deg) or not math.isfinite(gyro_bias_raw):
             raise ValueError("IMU calibration offsets must be finite")
+        if gyro_correction_time_constant_s is not None and (
+                not math.isfinite(gyro_correction_time_constant_s)
+                or gyro_correction_time_constant_s <= 0):
+            raise ValueError("gyro_correction_time_constant_s must be positive")
         self.slope_accel_sign = slope_accel_sign
         self.gravity_accel_sign = gravity_accel_sign
         self.gyro_sign = gyro_sign
@@ -44,6 +49,7 @@ class PitchEstimator:
         self.gyro_weight = gyro_weight
         self.pitch_zero_offset_deg = pitch_zero_offset_deg
         self.gyro_bias_raw = gyro_bias_raw
+        self.gyro_correction_time_constant_s = gyro_correction_time_constant_s
         self._estimate: PitchEstimate | None = None
 
     def reset(self) -> None:
@@ -59,7 +65,11 @@ class PitchEstimator:
             return self._estimate
         elapsed_s = sample.timestamp_s - previous.timestamp_s
         gyro_pitch = previous.pitch_deg + gyro_rate * elapsed_s
-        pitch = self.gyro_weight * gyro_pitch + (1.0 - self.gyro_weight) * acceleration
+        if self.gyro_correction_time_constant_s is None:
+            gyro_weight = self.gyro_weight
+        else:
+            gyro_weight = math.exp(-elapsed_s / self.gyro_correction_time_constant_s)
+        pitch = gyro_weight * gyro_pitch + (1.0 - gyro_weight) * acceleration
         self._estimate = PitchEstimate(sample.timestamp_s, pitch, gyro_rate)
         return self._estimate
 

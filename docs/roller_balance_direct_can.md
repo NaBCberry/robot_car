@@ -66,6 +66,8 @@ cd /userdata/rdkstudio/projects/robot_car
 当前安装中水管纵向为 IMU `z`、向上法线为 `y`、转轴为 `x`。在水管置于机械零点时记录
 `monitor_icm42688.sh --calibrate-samples 100` 输出的两个数，填入 `imu.pitch_zero_offset_deg` 和
 `imu.gyro_bias_raw`；之后显示和控制使用的角度即以机械零点为 `0°`，且不会积分静止陀螺仪偏置。
+`gyro_correction_time_constant_s` 是陀螺仪积分向重力角收敛的时间常数；当前 `0.4 s` 使水管回到
+零位后约 1.2 秒内消除绝大多数残余角，且监测和控制入口的滤波行为一致。
 确认方向、角度范围和 Y42 报文后，再将配置的 `enabled` 改为 `true`，车轮悬空、急停有效时
 执行：
 

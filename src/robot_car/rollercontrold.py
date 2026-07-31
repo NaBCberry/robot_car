@@ -43,7 +43,8 @@ class RollerControlDaemon:
             gravity_accel_sign=int(imu.get("gravity_accel_sign", 1)),
             gyro_sign=int(imu.get("gyro_sign", 1)), gyro_weight=float(imu.get("gyro_weight", 0.98)),
             pitch_zero_offset_deg=float(imu.get("pitch_zero_offset_deg", 0.0)),
-            gyro_bias_raw=float(imu.get("gyro_bias_raw", 0.0)))
+            gyro_bias_raw=float(imu.get("gyro_bias_raw", 0.0)),
+            gyro_correction_time_constant_s=imu.get("gyro_correction_time_constant_s"))
         self.ball_estimator = BallStateEstimator(
             velocity_alpha=float(estimator.get("velocity_alpha", 0.35)),
             acceleration_alpha=float(estimator.get("acceleration_alpha", 0.20)),
@@ -74,11 +75,11 @@ class RollerControlDaemon:
         try:
             while not self.stop_event.is_set():
                 self._receive_event()
-                estimate = self.pitch.update(self.sensor.sample())
-                now_s = estimate.timestamp_s
+                now_s = time.monotonic()
                 if now_s - self.last_command_s >= self.command_interval_s:
+                    estimate = self.pitch.update(self.sensor.sample())
                     self._control(now_s, estimate.pitch_deg)
-                    self.last_command_s = now_s
+                    self.last_command_s = estimate.timestamp_s
                 self.stop_event.wait(0.001)
         finally:
             self.subscriber.close()
