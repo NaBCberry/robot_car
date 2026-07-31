@@ -54,6 +54,15 @@ class ActionDispatcherTests(unittest.TestCase):
         self.assertEqual(dispatcher.phase, "DIRECT_TO_POSITIVE")
         self.assertEqual(dispatcher.target_mm, 50.0)
 
+    def test_line_balance_actions_keep_m0_on_line_follow(self):
+        for action in (ActionId.LINE_TO_B_BALANCE_CENTER,
+                       ActionId.LINE_LAP_BALANCE_CENTER,
+                       ActionId.LINE_LAP_BALANCE_TARGET):
+            dispatcher = ActionDispatcher({})
+            parameters = {"target_mm": 30} if action == ActionId.LINE_LAP_BALANCE_TARGET else {}
+            dispatcher.request(action, parameters, now_ms=1000)
+            self.assertEqual(dispatcher.motion_mode().name, "LINE_FOLLOW")
+
     def test_m0_checkpoint_completes_lap_action(self):
         dispatcher = ActionDispatcher({})
         dispatcher.request(ActionId.LINE_LAP_TO_A, now_ms=1000)

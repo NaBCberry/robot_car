@@ -88,9 +88,9 @@ JSON 必须使用紧凑 UTF-8 编码，整个 `CMD_EVENT.payload`（包括 JSON 
 | `1` | 摆杆电机回零 | 可选 `timeout_ms`（默认 30000） | RDK 独占 CAN 控制 Y42 步进电机回到绝对坐标零点 |
 | `2` | 题2 | 可选 `timeout_ms`，默认 20000 | 顺时针巡线一圈并在 A 点结束 |
 | `3` | 题3 | 可选 `positive_mm`（默认 50）、`timeout_ms`（默认 5000） | 钢球从中心到正向位置，再回中心，最后到负向位置并稳定 |
-| `4` | 题4 | 可选 `timeout_ms`（默认 8000） | 巡线到 B；滚珠控制使用中心目标（`target_mm=0`） |
-| `5` | 题5 | 可选 `timeout_ms`（默认 30000） | 巡线一圈；滚珠控制使用中心目标（`target_mm=0`） |
-| `6` | 题6 | **`target_mm` 必填**；可选 `timeout_ms`（默认 30000） | 巡线一圈；滚珠保持启动时指定位置 |
+| `4` | 题4 | 可选 `timeout_ms`（默认 8000） | M0 巡线到 B；RDK 直接 CAN 控制滚珠保持中心（`target_mm=0`） |
+| `5` | 题5 | 可选 `timeout_ms`（默认 30000） | M0 巡线一圈；RDK 直接 CAN 控制滚珠保持中心（`target_mm=0`） |
+| `6` | 题6 | **`target_mm` 必填**；可选 `timeout_ms`（默认 30000） | M0 巡线一圈；RDK 直接 CAN 控制滚珠保持启动时指定位置 |
 
 `target_mm` 和 `positive_mm` 的单位均为 mm，中心 O 为 `0`，正负方向必须与
 `camera.yaml` 和 MSPM0 的标定方向一致。`timeout_ms` 单位为 ms，必须为正整数。
@@ -239,7 +239,20 @@ RDK 计算或发送。当钢球丢失、状态过期、平衡开关关闭或 RDK
 和 `capture_state`。捕获反馈关闭时，MSPM0 只能上报 `CAPTURE_ATTEMPTED`，不能把
 已发出磁铁动作误报为 `CAPTURED`。
 
-若用于滚珠控制的车体惯性前馈，建议在同一 JSON 中增加：
+题 4、5、6 由 RDK 直接控制摆杆时，MSPM0 可在同一 `TELEMETRY` JSON 顶层提供
+`roller_feedforward_mm_s2`。该值必须已经换算到滚珠控制所需的管槽正方向，单位为
+`mm/s^2`；正负方向必须与 `target_mm` 一致。
+
+```json
+{"roller_feedforward_mm_s2":120}
+```
+
+RDK 每次控制周期都使用最近一帧未超时遥测中的该值。字段缺失、`null`、非数值、非有限
+数、遥测超时或链路中断时，前馈**立即视为 `0`**，不会延用上一次的值。MSPM0 应仅在有
+有效车体加速度前馈时发送该字段；不具备前馈数据时可以省略它或显式发送 `0`。
+
+若需要上报原始车体运动信息，可额外使用以下嵌套对象；它仅用于诊断，当前不会直接驱动
+摆杆 PID：
 
 ```json
 {"vehicle_motion":{"valid":true,"source":"m0_imu",
@@ -247,5 +260,4 @@ RDK 计算或发送。当钢球丢失、状态过期、平衡开关关闭或 RDK
 "speed_mm_s":380,"yaw_rate_mdeg_s":420,"timestamp_ms":123456}}
 ```
 
-RDK 必须校验 `valid`、时间戳和超时；数据无效或超过配置限幅时回退到纯反馈控制。
 铰链端 ICM42688 的局部加速度不得直接标记为 `source=m0_imu`。

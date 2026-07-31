@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import math
 from queue import Empty, Queue
 import signal
 import threading
@@ -78,8 +79,7 @@ class RollerControlDaemon:
         self.deceleration_rpm_s = int(motor["deceleration_rpm_s"])
         self.command_interval_s = 1.0 / float(motor.get("command_hz", 40))
         self.state_timeout_ms = int(control_config.get("state_timeout_ms", 120))
-        self.target_mm = 0.0 if task in (1, 2) else float(
-            control_config.get("target_mm", 0) if target_mm is None else target_mm)
+        self.target_mm = float(control_config.get("target_mm", 0) if target_mm is None else target_mm)
         self.task = task
         self.sequence_state = "TO_POSITIVE" if task == 2 and start_immediately else (
             "CENTERING" if task == 2 else "CONTINUOUS")
@@ -105,6 +105,27 @@ class RollerControlDaemon:
         self.reported_stale_ball_state = False
         self.last_command_s = 0.0
         self.last_safe = False
+        self._feedforward_lock = threading.Lock()
+        self._feedforward_mm_s2 = 0.0
+
+    def set_feedforward_mm_s2(self, value: float | None) -> None:
+        """Set the latest M0-provided, tube-axis acceleration feedforward.
+
+        Missing, malformed, or non-finite telemetry must never leave a stale
+        acceleration command active, so it is represented as zero.
+        """
+        try:
+            feedforward = float(value) if value is not None else 0.0
+        except (TypeError, ValueError):
+            feedforward = 0.0
+        if not math.isfinite(feedforward):
+            feedforward = 0.0
+        with self._feedforward_lock:
+            self._feedforward_mm_s2 = feedforward
+
+    def _feedforward(self) -> float:
+        with self._feedforward_lock:
+            return self._feedforward_mm_s2
 
     def _announce(self, message: str) -> None:
         if not self.quiet:
@@ -184,7 +205,8 @@ class RollerControlDaemon:
         else:
             target_mm = self.target_mm
         command = self.controller.step(target_mm, ball, tube_angle_deg,
-                                       self.command_interval_s)
+                                       self.command_interval_s,
+                                       target_acceleration_mm_s2=self._feedforward())
         if self.armed or self.dry_run:
             self.actuator.move_absolute(command.target_motor_angle_deg, speed_rpm=self.speed_rpm,
                                         acceleration_rpm_s=self.acceleration_rpm_s,

@@ -223,7 +223,11 @@ class ActionDispatcher:
             return None
         if self.active_action == ActionId.ROLLER_HOME:
             return None
-        if self.active_action == ActionId.LINE_LAP_TO_A:
+        if self.active_action in {
+                ActionId.LINE_LAP_TO_A,
+                ActionId.LINE_TO_B_BALANCE_CENTER,
+                ActionId.LINE_LAP_BALANCE_CENTER,
+                ActionId.LINE_LAP_BALANCE_TARGET}:
             return MotionMode.LINE_FOLLOW
         return MotionMode.BALANCE_ROLLER
 
