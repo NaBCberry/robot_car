@@ -13,11 +13,13 @@ from robot_car.protocol.messages import MotionMode
 
 class ActionId(IntEnum):
     STOP = 0
-    LINE_LAP_TO_A = 1
-    ROLLER_SWEEP = 2
-    LINE_TO_B_BALANCE_CENTER = 3
-    LINE_LAP_BALANCE_CENTER = 4
-    LINE_LAP_BALANCE_TARGET = 5
+    # Match the five numbered tasks in H.pdf so TUI/UART action IDs are
+    # directly recognizable at the competition site.
+    LINE_LAP_TO_A = 2
+    ROLLER_SWEEP = 3
+    LINE_TO_B_BALANCE_CENTER = 4
+    LINE_LAP_BALANCE_CENTER = 5
+    LINE_LAP_BALANCE_TARGET = 6
 
 
 @dataclass(frozen=True)

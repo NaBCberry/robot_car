@@ -9,20 +9,20 @@ from typing import Any, Dict
 
 ACTION_NAMES = {
     0: "STOP",
-    1: "LINE_LAP_TO_A",
-    2: "ROLLER_SWEEP",
-    3: "LINE_TO_B_BALANCE_CENTER",
-    4: "LINE_LAP_BALANCE_CENTER",
-    5: "LINE_LAP_BALANCE_TARGET",
+    2: "LINE_LAP_TO_A",
+    3: "ROLLER_SWEEP",
+    4: "LINE_TO_B_BALANCE_CENTER",
+    5: "LINE_LAP_BALANCE_CENTER",
+    6: "LINE_LAP_BALANCE_TARGET",
 }
 
 ACTION_TASKS = {
     0: "停止",
-    1: "题2 巡线一圈回A",
-    2: "题3 滚珠+50后-50",
-    3: "题4 巡线到B并保持中心",
-    4: "题5 巡线一圈保持中心",
-    5: "题6 巡线一圈保持指定位置",
+    2: "题2 巡线一圈回A",
+    3: "题3 滚珠+50后-50",
+    4: "题4 巡线到B并保持中心",
+    5: "题5 巡线一圈保持中心",
+    6: "题6 巡线一圈保持指定位置",
 }
 
 
@@ -76,9 +76,9 @@ def _draw(screen: Any, daemon: Any, roller_config: Dict[str, Any], input_buffer:
               f"球误差={_number(action.get('ball_error_mm'))}mm | "
               f"UART RX={snapshot['gateway']['received']} ACK={snapshot['gateway']['acks']}")
     screen.addnstr(1, 0, status, max(1, curses.COLS - 1))
-    screen.addnstr(3, 0, f"动作映射: {ACTION_TASKS[0]} | {ACTION_TASKS[1]} | {ACTION_TASKS[2]}",
+    screen.addnstr(3, 0, f"动作映射: 0{ACTION_TASKS[0]} | {ACTION_TASKS[2]} | {ACTION_TASKS[3]}",
                    max(1, curses.COLS - 1))
-    screen.addnstr(4, 0, f"动作映射: {ACTION_TASKS[3]} | {ACTION_TASKS[4]} | {ACTION_TASKS[5]}",
+    screen.addnstr(4, 0, f"动作映射: {ACTION_TASKS[4]} | {ACTION_TASKS[5]} | {ACTION_TASKS[6]}",
                    max(1, curses.COLS - 1))
     screen.addnstr(6, 0, "输入动作编号并回车，S=停止，ESC=停止，Q=退出",
                    max(1, curses.COLS - 1))
