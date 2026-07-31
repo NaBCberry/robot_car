@@ -25,13 +25,15 @@ robot_car/
 ├── docs/
 │   ├── vision_to_motion_flow.md       # OCR/通用视觉事件到 MSPM0 运动目标的流程图和时序图
 │   ├── steelball_capture_control.md   # 钢球单一语义运动链路、协议分层、标定和安全语义
-│   └── steelball_uart_bringup.md      # 最下方钢球识别、临时标定和真实 UART 联调说明
+│   ├── steelball_uart_bringup.md      # 最下方钢球识别、临时标定和真实 UART 联调说明
+│   └── roller_balance_direct_can.md   # ICM42688/Y42 直接 CAN 滚珠闭环、标定和安全流程
 ├── config/                            # 所有可部署参数，硬件路径不写死在代码中
 │   ├── base.yaml                      # 运行数据根目录、日志级别、UDS 和调试 Web 配置
 │   ├── camera.yaml                    # 摄像头启停、设备、图像参数及钢球捕获坐标标定
 │   ├── vision.yaml                    # 视觉插件列表、频率、优先级、BPU 和确认策略
 │   ├── vehicle.yaml                   # 状态机、车控总开关、心跳和超时参数
-│   └── transport.yaml                 # Fake/UART/CAN 类型、端口、波特率、CAN ID 和心跳开关
+│   ├── transport.yaml                 # Fake/UART/CAN 类型、端口、波特率、CAN ID 和心跳开关
+│   └── roller_control.yaml             # 独立 Y42 CAN 摆杆闭环的 IMU、PID、坡度和曲轴标定
 ├── deploy/
 │   └── systemd/                       # 仅供人工部署的 systemd 模板，不自动安装
 │       ├── robot-vehicle.service      # vehicled 服务模板，要求先启动
@@ -40,6 +42,8 @@ robot_car/
 │   ├── diagnose_hardware.sh           # 只读列举 Python、视频、串口和 CAN 候选资源
 │   ├── send_protocol_frame.sh          # 显式确认后向指定 UART 发送一帧协议测试数据
 │   ├── run_steelball_uart.sh           # 相机识别最下方钢球并向 UART 输出极坐标的联调入口
+│   ├── run_roller_balance_uart.sh      # 顶置滚珠位置偏差的安全 UART 输出入口
+│   ├── run_roller_balance_can.sh       # 独立的 ICM42688/Y42 直接 CAN 控制入口，默认不使能
 │   ├── run_vehicled.sh                # 设置工作目录/PYTHONPATH 后启动 vehicled
 │   └── run_visiond.sh                 # 设置工作目录/PYTHONPATH 后启动 visiond
 ├── src/
@@ -48,6 +52,7 @@ robot_car/
 │       ├── config.py                  # YAML 合并、关键参数校验和运行目录创建
 │       ├── visiond.py                 # 单摄像头所有者、插件调度、事件发布和调试 API
 │       ├── vehicled.py                # 视觉订阅、状态机、心跳和 MSPM0 唯一通信出口
+│       ├── rollercontrold.py           # 独立订阅滚珠事件并驱动 Y42 的闭环守护进程
 │       ├── camera/                    # 摄像头采集层
 │       │   ├── __init__.py            # camera 子包声明
 │       │   ├── capture.py             # 唯一打开摄像头的实现，使用容量为 1 的最新帧队列
@@ -93,11 +98,17 @@ robot_car/
 │       │   ├── __init__.py            # web 子包声明
 │       │   ├── server.py              # 实时识别页面、MJPEG 视频流及只读 JSON API
 │       │   └── overlay.py             # 在网页预览叠加识别框和极坐标，不参与决策
-│       └── observability/             # 日志、指标和可选事件记录
+│       ├── observability/             # 日志、指标和可选事件记录
 │           ├── __init__.py            # observability 子包声明
 │           ├── logging.py             # 控制台和运行数据目录文件日志初始化
 │           ├── metrics.py             # 线程安全的轻量计数器/指标快照
 │           └── recorder.py            # 可选 JSON-lines 视觉事件记录器
+│       └── roller_control/            # 与 UART/MSPM0 解耦的直接摆杆闭环模块
+│           ├── icm42688.py            # SPI 身份校验、配置和原始 IMU 数据读取
+│           ├── attitude.py            # 单轴互补滤波，输出摆杆实际俯仰角
+│           ├── control.py             # 钢球状态估计、坡度补偿和级联 PID
+│           ├── y42_actuator.py        # 复用 canstep 的 Y42 CAN 协议执行器
+│           └── config.py              # 独立的滚珠闭环配置解析
 ├── tests/                             # 无摄像头和无 MSPM0 可运行的自动化测试
 │   ├── test_protocol.py               # CRC、协议字段、ACK 及捕获目标安全门控
 │   ├── test_state_machine.py          # 状态迁移、安全门控、超时和捕获伺服状态
