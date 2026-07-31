@@ -17,6 +17,15 @@ class FakeDriver:
         self.closed = True
 
 
+class ReadingDriver(FakeDriver):
+    def __init__(self, *args, responses):
+        super().__init__(*args)
+        self.responses = iter(responses)
+
+    def receive(self, _timeout):
+        return next(self.responses, None)
+
+
 class Y42ActuatorTests(unittest.TestCase):
     def test_uses_absolute_trapezoid_commands_and_disables_on_close(self):
         calls = []
@@ -58,6 +67,18 @@ class Y42ActuatorTests(unittest.TestCase):
                                           deceleration_rpm_s=30)
         self.assertEqual(position, 10)
         self.assertEqual(calls[0].position, 10)
+
+    def test_reads_multiturn_position_and_single_turn_encoder(self):
+        driver = ReadingDriver("can0", False, responses=[
+            (0x0100, bytes((0x36, 1, 0, 0, 0x18, 0x3A, 0x6B)), True),
+            (0x0100, bytes((0x31, 0x80, 0x00, 0x6B)), True),
+        ])
+        actuator = Y42Actuator(interface="can0", address=1,
+                               driver_factory=lambda *_: driver,
+                               payload_builder=lambda arguments: (arguments.address, b"payload"),
+                               payload_sender=lambda *_: None)
+        self.assertEqual(actuator.read_position_deg(), -620.2)
+        self.assertEqual(actuator.read_encoder_deg(), 180.0)
 
 
 if __name__ == "__main__":

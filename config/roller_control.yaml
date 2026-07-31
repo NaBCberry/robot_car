@@ -35,8 +35,10 @@ motor:
   acceleration_rpm_s: 100
   deceleration_rpm_s: 100
   # Provisional bounds match the current curve endpoints. Re-measure before arming.
-  soft_limit_min_deg: -80
-  soft_limit_max_deg: 80
+  soft_limit_min_deg: -619.400
+  soft_limit_max_deg: 897.000
+  # Display-only ratio: raw Y42 multi-turn degrees / output-shaft degrees.
+  position_deg_per_output_deg: 1.0
 
 estimator:
   velocity_alpha: 0.35

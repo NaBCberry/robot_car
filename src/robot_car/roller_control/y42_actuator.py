@@ -66,25 +66,13 @@ class Y42Actuator:
         return bounded_angle
 
     def read_position_deg(self, timeout_s: float = 2.0) -> float:
-        if timeout_s <= 0 or getattr(self.driver, "dry_run", False):
-            raise RuntimeError("cannot read motor position without a real CAN connection")
-        arguments = SimpleNamespace(command="read", address=self.address, firmware=self.firmware,
-                                    sync=False, item="position")
-        address, payload = self.payload_builder(arguments)
-        self.payload_sender(self.driver, address, payload, self.packet_gap_ms)
-        deadline = time.monotonic() + timeout_s
-        while time.monotonic() < deadline:
-            received = self.driver.receive(max(0.001, deadline - time.monotonic()))
-            if received is None:
-                continue
-            can_id, data, extended = received
-            if not extended or can_id >> 8 != self.address or not data or data[0] != 0x36:
-                continue
-            if len(data) != 7 or data[-1] != 0x6B:
-                continue
-            position = int.from_bytes(data[2:6], "big") / 10.0
-            return -position if data[1] else position
-        raise RuntimeError("timed out reading Y42 motor position")
+        data = self._read("position", 0x36, 7, timeout_s)
+        position = int.from_bytes(data[2:6], "big") / 10.0
+        return -position if data[1] else position
+
+    def read_encoder_deg(self, timeout_s: float = 2.0) -> float:
+        data = self._read("encoder", 0x31, 4, timeout_s)
+        return int.from_bytes(data[1:3], "big") * 360.0 / 65536.0
 
     def close(self) -> None:
         try:
@@ -99,6 +87,24 @@ class Y42Actuator:
                                     sync=False, **kwargs)
         address, payload = self.payload_builder(arguments)
         self.payload_sender(self.driver, address, payload, self.packet_gap_ms)
+
+    def _read(self, item: str, code: int, length: int, timeout_s: float) -> bytes:
+        if timeout_s <= 0 or getattr(self.driver, "dry_run", False):
+            raise RuntimeError("cannot read motor state without a real CAN connection")
+        arguments = SimpleNamespace(command="read", address=self.address, firmware=self.firmware,
+                                    sync=False, item=item)
+        address, payload = self.payload_builder(arguments)
+        self.payload_sender(self.driver, address, payload, self.packet_gap_ms)
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            received = self.driver.receive(max(0.001, deadline - time.monotonic()))
+            if received is None:
+                continue
+            can_id, data, extended = received
+            if (extended and can_id >> 8 == self.address and len(data) == length
+                    and data[0] == code and data[-1] == 0x6B):
+                return data
+        raise RuntimeError("timed out reading Y42 motor state")
 
     def _bound_angle(self, value: float) -> float:
         if not math.isfinite(value):

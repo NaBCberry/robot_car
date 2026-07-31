@@ -71,6 +71,33 @@ def prompt_capture(label: str) -> None:
         raise RuntimeError("calibration cancelled")
 
 
+def display_motor_position(actuator: Y42Actuator, config: dict, label: str) -> float:
+    raw_position = actuator.read_position_deg()
+    encoder = actuator.read_encoder_deg()
+    ratio = float(config["motor"].get("position_deg_per_output_deg", 1.0))
+    if not math.isfinite(ratio) or ratio <= 0:
+        raise ValueError("position_deg_per_output_deg must be positive")
+    print("%s：Y42 多圈坐标 %.3f°，单圈编码器 %.3f°，换算输出轴 %.3f°" % (
+        label, raw_position, encoder, raw_position / ratio))
+    return raw_position
+
+
+def countdown(seconds: int) -> None:
+    for remaining in range(seconds, 0, -1):
+        print("%d..." % remaining, flush=True)
+        time.sleep(1)
+
+
+def wait_for_position(actuator: Y42Actuator, target_deg: float, timeout_s: float = 30.0) -> float:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        position = actuator.read_position_deg(timeout_s=min(2.0, deadline - time.monotonic()))
+        if abs(position - target_deg) <= 1.0:
+            return position
+        time.sleep(0.1)
+    raise RuntimeError("Y42 did not reach the requested position before timeout")
+
+
 def build_pitch(config: dict) -> tuple[Icm42688, PitchEstimator]:
     imu = config["imu"]
     sensor = Icm42688(int(imu["spi_bus"]), int(imu["chip_select"]),
@@ -114,20 +141,34 @@ def calibrate_limits(args: argparse.Namespace, config: dict, path: Path) -> int:
         actuator.disable()
         print("Y42 已发送 disable（松轴）。确认曲轴轴已脱开后再手动旋转电机。")
         prompt_capture("手动转到负方向安全端")
-        first = actuator.read_position_deg()
-        print("记录电机角度：%.3f°" % first)
+        first = display_motor_position(actuator, config, "记录负端")
         prompt_capture("手动转到正方向安全端")
-        second = actuator.read_position_deg()
-        print("记录电机角度：%.3f°" % second)
+        second = display_motor_position(actuator, config, "记录正端")
+        limits = soft_limits_from_points(first, second, args.margin_deg)
+        print("\n建议写入（Y42 多圈控制坐标）：")
+        print("  soft_limit_min_deg: %.3f" % limits[0])
+        print("  soft_limit_max_deg: %.3f" % limits[1])
+        if getattr(args, "prompt_apply", False):
+            args.apply = input("写入软限位？输入 APPLY 确认: ").strip().upper() == "APPLY"
+        if args.apply:
+            update_config(path, limits=limits)
+            print("已写入 %s" % path)
+        if input("曲轴轴是否已经锁紧？输入 LOCKED 继续: ").strip().upper() != "LOCKED":
+            return 0
+        if input("是否在 2 秒倒计时后回到 Y42 坐标零点？输入 HOME 确认: ").strip().upper() != "HOME":
+            return 0
+        if not limits[0] <= 0 <= limits[1]:
+            raise RuntimeError("Y42 坐标零点不在刚采集的软限位内，拒绝回零")
+        actuator.soft_limit_min_deg, actuator.soft_limit_max_deg = limits
+        print("即将回到 Y42 坐标零点；请确认急停有效且手部已离开机构。")
+        countdown(2)
+        actuator.enable()
+        actuator.move_absolute(0.0, speed_rpm=5.0, acceleration_rpm_s=30,
+                               deceleration_rpm_s=30)
+        position = wait_for_position(actuator, 0.0)
+        print("已回到 Y42 坐标零点：%.3f°" % position)
     finally:
         actuator.close()
-    limits = soft_limits_from_points(first, second, args.margin_deg)
-    print("\n建议写入：")
-    print("  soft_limit_min_deg: %.3f" % limits[0])
-    print("  soft_limit_max_deg: %.3f" % limits[1])
-    if args.apply:
-        update_config(path, limits=limits)
-        print("已写入 %s" % path)
     return 0
 
 
@@ -153,7 +194,7 @@ def calibrate_crank(args: argparse.Namespace, config: dict, path: Path) -> int:
                                   acceleration_rpm_s=args.acceleration_rpm_s,
                                   deceleration_rpm_s=args.deceleration_rpm_s)
             time.sleep(args.settle_s)
-            actual = actuator.read_position_deg()
+            actual = display_motor_position(actuator, config, "  采样")
             tube = average_tube_pitch(sensor, pitch, samples=args.samples, hz=args.sample_hz)
             measurements.append((actual, tube))
             print("  实际电机 %.3f°，水管 %.3f°" % (actual, tube))
@@ -198,7 +239,8 @@ def choose_interactive_mode(args: argparse.Namespace) -> argparse.Namespace:
         args.mode = "limits"
         margin = input("每端安全余量（度）[2]: ").strip()
         args.margin_deg = float(margin or 2.0)
-        args.apply = input("采集完成后写入配置？输入 APPLY 确认: ").strip().upper() == "APPLY"
+        args.apply = False
+        args.prompt_apply = True
         return args
     if choice == "2":
         args.mode = "map"
