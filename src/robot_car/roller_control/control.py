@@ -143,9 +143,12 @@ class RollerController:
     def __init__(self, position_pid: Pid, velocity_pid: Pid, angle_pid: Pid,
                  slope_bias: LinearTable, motor_by_tube_angle: LinearTable, *,
                  target_min_mm: float, target_max_mm: float, tube_angle_min_deg: float,
-                 tube_angle_max_deg: float, tilt_sign: float = 1.0) -> None:
+                 tube_angle_max_deg: float, motor_angle_min_deg: float,
+                 motor_angle_max_deg: float, tilt_sign: float = 1.0) -> None:
         if target_min_mm >= target_max_mm or tube_angle_min_deg >= tube_angle_max_deg:
             raise ValueError("roller control limits are invalid")
+        if motor_angle_min_deg >= motor_angle_max_deg:
+            raise ValueError("motor soft limits are invalid")
         if tilt_sign not in {-1.0, 1.0}:
             raise ValueError("tilt_sign must be -1 or 1")
         self.position_pid = position_pid
@@ -157,6 +160,8 @@ class RollerController:
         self.target_max_mm = target_max_mm
         self.tube_angle_min_deg = tube_angle_min_deg
         self.tube_angle_max_deg = tube_angle_max_deg
+        self.motor_angle_min_deg = motor_angle_min_deg
+        self.motor_angle_max_deg = motor_angle_max_deg
         self.tilt_sign = tilt_sign
 
     def reset(self) -> None:
@@ -179,5 +184,7 @@ class RollerController:
                                  min(self.tube_angle_max_deg, desired_tube_angle))
         motor_feedforward = self.motor_by_tube_angle.at(desired_tube_angle)
         motor_correction = self.angle_pid.update(desired_tube_angle - tube_angle_deg, elapsed_s)
-        return RollerCommand(True, desired_tube_angle, motor_feedforward + motor_correction,
+        motor_angle = max(self.motor_angle_min_deg,
+                          min(self.motor_angle_max_deg, motor_feedforward + motor_correction))
+        return RollerCommand(True, desired_tube_angle, motor_angle,
                              velocity_reference, acceleration)

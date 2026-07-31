@@ -54,7 +54,9 @@ class RollerControlDaemon:
         self.controller = build_controller(control_config)
         self.actuator = Y42Actuator(interface=str(motor["can_interface"]),
                                     address=int(motor["address"]),
-                                    packet_gap_ms=float(motor.get("packet_gap_ms", 3)), dry_run=dry_run)
+                                    packet_gap_ms=float(motor.get("packet_gap_ms", 3)), dry_run=dry_run,
+                                    soft_limit_min_deg=float(motor["soft_limit_min_deg"]),
+                                    soft_limit_max_deg=float(motor["soft_limit_max_deg"]))
         self.speed_rpm = float(motor["speed_rpm"])
         self.acceleration_rpm_s = int(motor["acceleration_rpm_s"])
         self.deceleration_rpm_s = int(motor["deceleration_rpm_s"])

@@ -34,6 +34,9 @@ motor:
   speed_rpm: 20
   acceleration_rpm_s: 100
   deceleration_rpm_s: 100
+  # Provisional bounds match the current curve endpoints. Re-measure before arming.
+  soft_limit_min_deg: -80
+  soft_limit_max_deg: 80
 
 estimator:
   velocity_alpha: 0.35

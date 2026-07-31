@@ -3,17 +3,26 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+import math
+import time
 from typing import Any, Callable
 
 
 class Y42Actuator:
     def __init__(self, *, interface: str, address: int, firmware: str = "x",
                  packet_gap_ms: float = 3.0, dry_run: bool = False,
+                 soft_limit_min_deg: float | None = None, soft_limit_max_deg: float | None = None,
                  driver_factory: Callable[[str, bool], Any] | None = None,
                  payload_builder: Callable[[Any], tuple[int, bytes]] | None = None,
                  payload_sender: Callable[..., None] | None = None) -> None:
         if not interface or not 0 <= address <= 255 or firmware != "x" or packet_gap_ms < 0:
             raise ValueError("Y42 actuator configuration is invalid")
+        if (soft_limit_min_deg is None) != (soft_limit_max_deg is None):
+            raise ValueError("both motor soft limits must be configured together")
+        if soft_limit_min_deg is not None and (
+                not math.isfinite(soft_limit_min_deg) or not math.isfinite(soft_limit_max_deg)
+                or soft_limit_min_deg >= soft_limit_max_deg):
+            raise ValueError("motor soft limits are invalid")
         if driver_factory is None or payload_builder is None or payload_sender is None:
             try:
                 from canstep.can_driver import CANDriver, make_payload, send_payload
@@ -25,6 +34,8 @@ class Y42Actuator:
         self.address = address
         self.firmware = firmware
         self.packet_gap_ms = packet_gap_ms
+        self.soft_limit_min_deg = soft_limit_min_deg
+        self.soft_limit_max_deg = soft_limit_max_deg
         self.driver = driver_factory(interface, dry_run)
         self.payload_builder = payload_builder
         self.payload_sender = payload_sender
@@ -45,12 +56,35 @@ class Y42Actuator:
         self._send("stop")
 
     def move_absolute(self, motor_angle_deg: float, *, speed_rpm: float,
-                      acceleration_rpm_s: int, deceleration_rpm_s: int) -> None:
+                      acceleration_rpm_s: int, deceleration_rpm_s: int) -> float:
         if speed_rpm <= 0 or acceleration_rpm_s < 0 or deceleration_rpm_s < 0:
             raise ValueError("Y42 trapezoid parameters are invalid")
-        self._send("trapezoid", direction="cw" if motor_angle_deg >= 0 else "ccw",
+        bounded_angle = self._bound_angle(motor_angle_deg)
+        self._send("trapezoid", direction="cw" if bounded_angle >= 0 else "ccw",
                    acceleration=acceleration_rpm_s, deceleration=deceleration_rpm_s,
-                   speed=speed_rpm, position=abs(motor_angle_deg), mode="absolute-zero")
+                   speed=speed_rpm, position=abs(bounded_angle), mode="absolute-zero")
+        return bounded_angle
+
+    def read_position_deg(self, timeout_s: float = 2.0) -> float:
+        if timeout_s <= 0 or getattr(self.driver, "dry_run", False):
+            raise RuntimeError("cannot read motor position without a real CAN connection")
+        arguments = SimpleNamespace(command="read", address=self.address, firmware=self.firmware,
+                                    sync=False, item="position")
+        address, payload = self.payload_builder(arguments)
+        self.payload_sender(self.driver, address, payload, self.packet_gap_ms)
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            received = self.driver.receive(max(0.001, deadline - time.monotonic()))
+            if received is None:
+                continue
+            can_id, data, extended = received
+            if not extended or can_id >> 8 != self.address or not data or data[0] != 0x36:
+                continue
+            if len(data) != 7 or data[-1] != 0x6B:
+                continue
+            position = int.from_bytes(data[2:6], "big") / 10.0
+            return -position if data[1] else position
+        raise RuntimeError("timed out reading Y42 motor position")
 
     def close(self) -> None:
         try:
@@ -65,3 +99,10 @@ class Y42Actuator:
                                     sync=False, **kwargs)
         address, payload = self.payload_builder(arguments)
         self.payload_sender(self.driver, address, payload, self.packet_gap_ms)
+
+    def _bound_angle(self, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("motor angle must be finite")
+        if self.soft_limit_min_deg is None:
+            return value
+        return max(self.soft_limit_min_deg, min(self.soft_limit_max_deg, value))

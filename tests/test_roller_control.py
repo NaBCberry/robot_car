@@ -34,7 +34,7 @@ class RollerControlTests(unittest.TestCase):
             LinearTable([[-100, -1], [0, 0], [100, 1]], name="slope_bias"),
             LinearTable([[-15, -150], [0, 0], [15, 150]], name="motor_curve"),
             target_min_mm=-100, target_max_mm=100, tube_angle_min_deg=-15,
-            tube_angle_max_deg=15)
+            tube_angle_max_deg=15, motor_angle_min_deg=-120, motor_angle_max_deg=120)
         command = controller.step(20, BallState(1000, 0, 0, 0), 0, 0.02)
         self.assertTrue(command.enabled)
         self.assertGreater(command.target_tube_angle_deg, 0)
@@ -47,9 +47,19 @@ class RollerControlTests(unittest.TestCase):
             LinearTable([[-10, 0], [10, 0]], name="slope_bias"),
             LinearTable([[-10, -10], [10, 10]], name="motor_curve"),
             target_min_mm=-10, target_max_mm=10, tube_angle_min_deg=-10,
-            tube_angle_max_deg=10)
+            tube_angle_max_deg=10, motor_angle_min_deg=-10, motor_angle_max_deg=10)
         with self.assertRaisesRegex(ValueError, "outside"):
             controller.step(11, BallState(0, 0, 0, 0), 0, 0.1)
+
+    def test_clamps_motor_output_to_soft_limits(self):
+        controller = RollerController(
+            pid(100), pid(2_000), pid(20),
+            LinearTable([[-10, 10], [10, 10]], name="slope_bias"),
+            LinearTable([[-10, -100], [10, 100]], name="motor_curve"),
+            target_min_mm=-10, target_max_mm=10, tube_angle_min_deg=-10,
+            tube_angle_max_deg=10, motor_angle_min_deg=-80, motor_angle_max_deg=80)
+        command = controller.step(10, BallState(0, 0, 0, 0), 0, 0.1)
+        self.assertEqual(command.target_motor_angle_deg, 80)
 
 
 if __name__ == "__main__":

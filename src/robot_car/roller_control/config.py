@@ -23,6 +23,7 @@ def load_roller_control(path: str | Path) -> dict[str, Any]:
 
 def build_controller(config: dict[str, Any]) -> RollerController:
     control = _require_mapping(config, "control")
+    motor = _require_mapping(config, "motor")
     limits = _require_mapping(control, "limits")
     return RollerController(
         _pid(_require_mapping(control, "position_pid")),
@@ -33,6 +34,8 @@ def build_controller(config: dict[str, Any]) -> RollerController:
         target_min_mm=float(limits["target_min_mm"]), target_max_mm=float(limits["target_max_mm"]),
         tube_angle_min_deg=float(limits["tube_angle_min_deg"]),
         tube_angle_max_deg=float(limits["tube_angle_max_deg"]),
+        motor_angle_min_deg=float(motor["soft_limit_min_deg"]),
+        motor_angle_max_deg=float(motor["soft_limit_max_deg"]),
         tilt_sign=float(control.get("tilt_sign", 1)),
     )
 

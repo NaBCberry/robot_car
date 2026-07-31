@@ -5,6 +5,7 @@ from robot_car.roller_control.config import build_controller
 
 def configuration():
     return {
+        "motor": {"soft_limit_min_deg": -50, "soft_limit_max_deg": 50},
         "control": {
             "tilt_sign": 1,
             "limits": {"target_min_mm": -10, "target_max_mm": 10,
@@ -25,7 +26,8 @@ class RollerControlConfigTests(unittest.TestCase):
 
     def test_rejects_incomplete_control_mapping(self):
         with self.assertRaisesRegex(ValueError, "position_pid"):
-            build_controller({"control": {"limits": {}}})
+            build_controller({"motor": {"soft_limit_min_deg": -1, "soft_limit_max_deg": 1},
+                              "control": {"limits": {}}})
 
 
 if __name__ == "__main__":

@@ -43,6 +43,22 @@ class Y42ActuatorTests(unittest.TestCase):
                          ("ccw", 12.5, "absolute-zero"))
         self.assertEqual(len(sent), 4)
 
+    def test_clamps_position_before_building_can_payload(self):
+        calls = []
+        driver = FakeDriver("can0", False)
+
+        def build(arguments):
+            calls.append(arguments)
+            return arguments.address, b"payload"
+
+        actuator = Y42Actuator(interface="can0", address=1, soft_limit_min_deg=-10,
+                               soft_limit_max_deg=10, driver_factory=lambda *_: driver,
+                               payload_builder=build, payload_sender=lambda *_: None)
+        position = actuator.move_absolute(20, speed_rpm=5, acceleration_rpm_s=30,
+                                          deceleration_rpm_s=30)
+        self.assertEqual(position, 10)
+        self.assertEqual(calls[0].position, 10)
+
 
 if __name__ == "__main__":
     unittest.main()
