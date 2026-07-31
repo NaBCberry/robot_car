@@ -16,7 +16,8 @@ trap cleanup EXIT INT TERM
 
 cd "${project_root}"
 echo "默认仅观测。请先修复 ICM42688 WHO_AM_I=0x47 检测，再在 roller_control.yaml 启用并显式传入 --arm。" >&2
-./scripts/run_visiond.sh &
+PYTHONPATH=/userdata/rdkstudio/projects:"${project_root}/src" \
+    python3 -m robot_car.visiond --config-dir config &
 vision_pid=$!
 PYTHONPATH=/userdata/rdkstudio/projects:${project_root}/src \
     python3 -m robot_car.rollercontrold --config-dir config "$@" &

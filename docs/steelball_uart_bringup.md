@@ -1,14 +1,15 @@
-# 最下方钢球 UART 生产联调
+# 已归档：最下方钢球 UART 联调
 
 本页给出真实相机、YOLO26 DET 钢球模型和 MSPM0 UART 的联调入口。它不修改
 `ultralytics_yolo26` 模型仓库，也不改写项目的配置文件。
+该链路已归档，不属于当前滚珠平衡的两个主入口。
 
 ## 默认输出模式
 
 先确认摄像头节点。例如实际节点为 `/dev/video0` 时，在项目根目录执行：
 
 ```bash
-./scripts/run_steelball_uart.sh --camera /dev/video0
+./scripts/archive/run_steelball_uart.sh --camera /dev/video0
 ```
 
 脚本会检查相机与 `/dev/ttyS1` 均为字符设备，加载以下现有模型：
@@ -24,7 +25,7 @@
 默认模型类型为 `det`。如需使用其他钢球检测模型，可通过参数覆盖：
 
 ```bash
-./scripts/run_steelball_uart.sh --camera /dev/video0 \
+./scripts/archive/run_steelball_uart.sh --camera /dev/video0 \
   --model-path /absolute/path/to/steelball_det_640x640_nv12.bin
 ```
 
@@ -93,7 +94,7 @@ MSPM0 已明确不依赖该心跳维持运行，或需要单独验证运动帧�
 脚本要求两个明确开关才会将 `enabled` 置为 `1`：
 
 ```bash
-./scripts/run_steelball_uart.sh \
+./scripts/archive/run_steelball_uart.sh \
   --camera /dev/video0 \
   --allow-motion \
   --allow-temporary-calibration

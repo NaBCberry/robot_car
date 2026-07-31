@@ -2,7 +2,7 @@
 # Start the steel-ball perception and UART target-output pipeline.
 set -euo pipefail
 
-project_root=$(cd "$(dirname "$0")/.." && pwd)
+project_root=$(cd "$(dirname "$0")/../.." && pwd)
 camera_device=/dev/video0
 uart_device=/dev/ttyS1
 baudrate=115200
@@ -14,7 +14,7 @@ allow_temporary_calibration=0
 usage() {
     cat <<'EOF'
 用法：
-  run_steelball_uart.sh [--camera DEVICE] [--uart DEVICE] [--baudrate RATE]
+  scripts/archive/run_steelball_uart.sh [--camera DEVICE] [--uart DEVICE] [--baudrate RATE]
                          [--model-type seg|det] [--model-path MODEL.bin]
                          [--allow-motion --allow-temporary-calibration]
 
@@ -154,8 +154,10 @@ else
     echo "输出模式：UART 会收到角度和距离，但 enabled=0，MSPM0 不得驱动电机。" >&2
 fi
 
-"$project_root/scripts/run_vehicled.sh" --config-dir "$runtime_config" --transport uart &
+PYTHONPATH=/userdata/rdkstudio/projects:"${project_root}/src" \
+    python3 -m robot_car.vehicled --config-dir "$runtime_config" --transport uart &
 vehicle_pid=$!
-"$project_root/scripts/run_visiond.sh" --config-dir "$runtime_config" &
+PYTHONPATH=/userdata/rdkstudio/projects:"${project_root}/src" \
+    python3 -m robot_car.visiond --config-dir "$runtime_config" &
 vision_pid=$!
 wait -n "$vision_pid" "$vehicle_pid"
