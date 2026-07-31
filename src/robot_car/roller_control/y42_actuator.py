@@ -13,6 +13,7 @@ class Y42Actuator:
                  packet_gap_ms: float = 3.0, dry_run: bool = False,
                  soft_limit_min_deg: float | None = None, soft_limit_max_deg: float | None = None,
                  pulses_per_revolution: int = 3200,
+                 show_tx: bool = True,
                  driver_factory: Callable[[str, bool], Any] | None = None,
                  payload_builder: Callable[[Any], tuple[int, bytes]] | None = None,
                  payload_sender: Callable[..., None] | None = None) -> None:
@@ -25,11 +26,13 @@ class Y42Actuator:
                 not math.isfinite(soft_limit_min_deg) or not math.isfinite(soft_limit_max_deg)
                 or soft_limit_min_deg >= soft_limit_max_deg):
             raise ValueError("motor soft limits are invalid")
+        builtin_driver = None
         if driver_factory is None or payload_builder is None or payload_sender is None:
             try:
                 from canstep.can_driver import CANDriver, make_payload, send_payload
             except ImportError as error:
                 raise RuntimeError("cannot import the local canstep Y42 driver") from error
+            builtin_driver = CANDriver
             driver_factory = driver_factory or CANDriver
             payload_builder = payload_builder or make_payload
             payload_sender = payload_sender or send_payload
@@ -39,7 +42,12 @@ class Y42Actuator:
         self.packet_gap_ms = packet_gap_ms
         self.soft_limit_min_deg = soft_limit_min_deg
         self.soft_limit_max_deg = soft_limit_max_deg
-        self.driver = driver_factory(interface, dry_run)
+        # Keep the small two-argument factory used by tests and integrations;
+        # the built-in CAN driver additionally accepts the TX visibility flag.
+        if builtin_driver is not None and driver_factory is builtin_driver:
+            self.driver = driver_factory(interface, dry_run, show_tx=show_tx)
+        else:
+            self.driver = driver_factory(interface, dry_run)
         self.payload_builder = payload_builder
         self.payload_sender = payload_sender
         self.enabled = False
@@ -109,8 +117,42 @@ class Y42Actuator:
                    acceleration=acceleration_rpm_s,
                    position=self._degrees_to_pulses(abs(motor_angle_deg)), mode="relative-target")
 
-    def home_absolute_zero(self) -> None:
-        self._send("home", mode=4)
+    def home_absolute_zero(self, *, wait: bool = False, timeout_s: float = 30.0) -> float | None:
+        """Start absolute-zero homing and optionally wait for completion.
+
+        Y42 acknowledges the 0x9A command separately from the physical
+        movement.  When ``wait`` is enabled, poll 0x3B and verify 0x36 so a
+        caller gets an explicit completed/failed result instead of returning
+        immediately after transmission.
+        """
+        if timeout_s <= 0:
+            raise ValueError("home timeout must be positive")
+        self._send("home", mode=4, confirm=wait, confirm_timeout_s=min(timeout_s, 5.0))
+        if not wait:
+            return None
+        print("已发送回零命令，等待 Y42 状态...", flush=True)
+        if getattr(self.driver, "dry_run", False):
+            print("回零完成（dry-run，未驱动硬件）", flush=True)
+            return 0.0
+        deadline = time.monotonic() + timeout_s
+        saw_active = False
+        announced = False
+        while time.monotonic() < deadline:
+            remaining = max(0.05, min(2.0, deadline - time.monotonic()))
+            status = self.read_home_status(timeout_s=remaining)
+            if status & 0x08:
+                raise RuntimeError("Y42 absolute home failed (status 0x%02X)" % status)
+            if status & 0x04:
+                saw_active = True
+                if not announced:
+                    print("回零进行中...", flush=True)
+                    announced = True
+            position = self.read_position_deg(timeout_s=remaining)
+            if not status & 0x04 and (saw_active or abs(position) <= 1.0):
+                print("回零完成，当前位置：%.3f°" % position, flush=True)
+                return position
+            time.sleep(0.1)
+        raise RuntimeError("Y42 absolute home timed out after %.1fs" % timeout_s)
 
     def read_position_deg(self, timeout_s: float = 2.0) -> float:
         return self._read_position_deg("position", 0x36, timeout_s)

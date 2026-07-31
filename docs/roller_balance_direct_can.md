@@ -9,7 +9,8 @@ MSPM0；本链路不启动 `vehicled`，只订阅 `visiond` 的本机事件并�
 
 - 初始 `config/roller_control.yaml` 中 `enabled: false`；即使传入 `--arm` 也不会使能电机。
 - 实际执行须同时设置 `enabled: true` 并显式传入 `--arm`。
-- `--dry-run` 只打印待发送的 Y42 CAN 帧，不能驱动电机。
+- `--dry-run` 不驱动电机；默认不打印 TX 帧，需要联调报文时追加 `--show-tx`。
+- `--home` 可在闭环启动前执行一次绝对坐标回零；该动作必须同时使用 `--arm`，完成后才进入视觉闭环。
 - ICM-42688-P 身份寄存器必须读取为 `0x47`；识别失败时进程在使能电机前退出。
 - 钢球事件超过 `state_timeout_ms` 未更新时，控制器立即停止发送位置更新并向已使能的
   Y42 发送停止命令。
@@ -106,10 +107,11 @@ EMM 实时位置使用协议规定的 `raw × 360 / 65536` 角度换算。
 cd /userdata/rdkstudio/projects/robot_car
 ./scripts/probe_icm42688.sh
 ./scripts/monitor_icm42688.sh --samples 20
-./scripts/run_roller_balance_can.sh --dry-run
+./scripts/run_roller_balance_can.sh --dry-run --show-tx
 ```
 
-该命令会启动现有网页和视觉服务；只有 ICM42688 已被识别后，才会输出待发送的 CAN 帧。
+该命令会启动现有网页和视觉服务；只有 ICM42688 已被识别后，才会进入控制循环。默认隐藏 TX 帧，
+需要检查报文时使用 `--show-tx`。
 `monitor_icm42688.sh` 不启动视觉、CAN 或电机，用于确认静止噪声、安装轴和正负方向；让水管
 向预期正方向缓慢抬起时，`pitch_deg` 应单调增加，否则调整 `imu` 的轴或符号配置。
 当前安装中水管纵向为 IMU `z`、向上法线为 `y`、转轴为 `x`。在水管置于机械零点时记录
@@ -139,6 +141,17 @@ cd /userdata/rdkstudio/projects/robot_car
 ```bash
 ./scripts/run_roller_balance_can.sh --telemetry-hz 5
 ```
+
+题 3 调参时可使用以下组合：
+
+```bash
+./scripts/run_roller_balance_can.sh --task 2 --arm --auto-confirm --telemetry-hz 10
+```
+
+`--auto-confirm` 仅用于调参，回中误差需连续保持在 `±5 mm` 超过 `2.1 s` 后自动开始计时；
+正常测试不加该选项，仍由操作员输入 `Y` 确认。到 `+50 mm` 后，控制器会等待位置误差不超过
+`6 mm` 且估计速度不超过 `20 mm/s` 才切换到 `-50 mm`，避免带着明显速度直接反向。
+计时在 `-50 mm` 稳定后结束，但控制器会继续闭环保持在该位置，直到手动停止进程。
 
 这不会使能或移动电机，但会按协议 `11 18` 订阅 Y42 的 `3C` 合并状态，并在每次遥测时主动读取 `36` 实时位置，输出
 视觉钢球位置/速度、IMU 水管角、期望水管角、命令电机角和实际电机角。加上 `--arm` 才会实际闭环运动。

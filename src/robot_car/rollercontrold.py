@@ -22,15 +22,25 @@ from robot_car.roller_control.y42_actuator import Y42Actuator
 
 LOG = logging.getLogger(__name__)
 
+CENTER_CONFIRM_WINDOW_MM = 5.0
+CENTER_CONFIRM_HOLD_S = 2.1
+FINAL_STABLE_WINDOW_MM = 10.0
+FINAL_STABLE_VELOCITY_MM_S = 40.0
+POSITIVE_REVERSAL_WINDOW_MM = 6.0
+POSITIVE_REVERSAL_VELOCITY_MM_S = 20.0
+
 
 class RollerControlDaemon:
     def __init__(self, app_config: dict, control_config: dict, *, armed: bool,
                  dry_run: bool, target_mm: float | None, telemetry_hz: float,
-                 task: int = 1) -> None:
+                 task: int = 1, show_tx: bool = False, home: bool = False,
+                 auto_confirm: bool = False) -> None:
         self.app_config = app_config
         self.control_config = control_config
         self.armed = armed and bool(control_config.get("enabled", False))
         self.dry_run = dry_run
+        self.home_requested = home
+        self.auto_confirm = auto_confirm
         self.stop_event = threading.Event()
         imu = control_config["imu"]
         motor = control_config["motor"]
@@ -58,7 +68,8 @@ class RollerControlDaemon:
                                     packet_gap_ms=float(motor.get("packet_gap_ms", 3)), dry_run=dry_run,
                                     soft_limit_min_deg=float(motor["soft_limit_min_deg"]),
                                     soft_limit_max_deg=float(motor["soft_limit_max_deg"]),
-                                    pulses_per_revolution=int(motor.get("pulses_per_revolution", 3200)))
+                                    pulses_per_revolution=int(motor.get("pulses_per_revolution", 3200)),
+                                    show_tx=show_tx)
         self.speed_rpm = float(motor["speed_rpm"])
         self.acceleration_rpm_s = int(motor["acceleration_rpm_s"])
         self.deceleration_rpm_s = int(motor["deceleration_rpm_s"])
@@ -86,6 +97,8 @@ class RollerControlDaemon:
         self.feedback_enabled = False
         self.subscriber = VisionEventSubscriber(app_config["runtime"]["vision_socket"])
         self.ball: BallState | None = None
+        self.received_ball_state = False
+        self.reported_stale_ball_state = False
         self.last_command_s = 0.0
         self.last_safe = False
 
@@ -93,14 +106,21 @@ class RollerControlDaemon:
         self.sensor.open()
         self.sensor.configure()
         self.actuator.open()
-        if self.telemetry_interval_s and not self.dry_run:
-            self.actuator.configure_feedback("home-and-status", self.feedback_period_ms)
-            self.feedback_enabled = True
-        if self.armed:
-            self.actuator.enable()
-        LOG.info("roller CAN controller started; armed=%s dry_run=%s target_mm=%.1f",
-                 self.armed, self.dry_run, self.target_mm)
         try:
+            if self.telemetry_interval_s and not self.dry_run:
+                self.actuator.configure_feedback("home-and-status", self.feedback_period_ms)
+                self.feedback_enabled = True
+            if self.home_requested and not (self.armed or self.dry_run):
+                raise RuntimeError("--home 会驱动电机，请同时传入 --arm（且 config.enabled 必须为 true）")
+            if self.armed:
+                self.actuator.enable()
+            if self.home_requested:
+                print("开始回零（绝对坐标零点）...", flush=True)
+                position = self.actuator.home_absolute_zero(wait=True, timeout_s=30.0)
+                if position is not None:
+                    LOG.info("absolute home complete: %.3f deg", position)
+            LOG.info("roller CAN controller started; task=%d armed=%s dry_run=%s target_mm=%.1f",
+                     self.task, self.armed, self.dry_run, self.target_mm)
             while not self.stop_event.is_set():
                 self._receive_event()
                 self._receive_motor_feedback()
@@ -124,10 +144,16 @@ class RollerControlDaemon:
             return
         now_ms = time.monotonic_ns() // 1_000_000
         if event.is_expired(now_ms):
+            if not self.reported_stale_ball_state:
+                self.reported_stale_ball_state = True
+                print("收到钢球视觉数据但已过期；请检查视觉推理延迟和 TTL 配置。", flush=True)
             return
         try:
             self.ball = self.ball_estimator.update(event.timestamp_monotonic_ms,
                                                     float(event.payload["error_mm"]))
+            if not self.received_ball_state:
+                self.received_ball_state = True
+                print("已接收滚珠视觉数据，开始回中判定。", flush=True)
         except (KeyError, TypeError, ValueError) as error:
             LOG.warning("ignored invalid ball state: %s", error)
 
@@ -146,8 +172,6 @@ class RollerControlDaemon:
         self.last_safe = False
         if self.task == 2:
             self._update_two_point_sequence(now_s)
-            if self.sequence_state == "COMPLETE":
-                return
             target_mm = self.sequence_target_mm
         else:
             target_mm = self.target_mm
@@ -182,12 +206,28 @@ class RollerControlDaemon:
             answer = ""
         self.sequence_confirmations.put(answer.strip().lower())
 
+    def _begin_two_point_sequence(self, now_s: float, *, automatic: bool) -> None:
+        self.sequence_state = "TO_POSITIVE"
+        self.sequence_started_s = now_s
+        self.sequence_target_mm = 50.0
+        self.sequence_stable_since_s = None
+        self.controller.reset()
+        prefix = "自动确认：" if automatic else "已确认："
+        print(prefix + "开始计时，前往 +5cm。", flush=True)
+
     def _update_two_point_sequence(self, now_s: float) -> None:
         ball = self.ball
         if ball is None:
             return
         target = self.sequence_target_mm
-        stable = abs(ball.position_mm - target) <= 10.0 and abs(ball.velocity_mm_s) <= 40.0
+        if self.sequence_state == "CENTERING":
+            # Pixel-to-mm rounding makes the differentiated velocity noisy at
+            # rest.  The initial operator confirmation needs a stable visual
+            # center, not a velocity estimate that can be reset by one pixel.
+            stable = abs(ball.position_mm) <= CENTER_CONFIRM_WINDOW_MM
+        else:
+            stable = (abs(ball.position_mm - target) <= FINAL_STABLE_WINDOW_MM
+                      and abs(ball.velocity_mm_s) <= FINAL_STABLE_VELOCITY_MM_S)
         if stable:
             if self.sequence_stable_since_s is None:
                 self.sequence_stable_since_s = now_s
@@ -201,15 +241,18 @@ class RollerControlDaemon:
                 and not self.sequence_timed_out):
             self._sequence_timeout(now_s)
         if self.sequence_state == "CENTERING":
-            if held_s >= 0.30 and not self.sequence_prompted:
+            if held_s >= CENTER_CONFIRM_HOLD_S and not self.sequence_prompted:
                 self.sequence_prompted = True
-                self.sequence_state = "WAIT_CONFIRM"
-                LOG.info("钢球已回中并稳定，请确认后开始题3计时")
-                print("钢球已回中并稳定。输入 Y 并回车后开始计时。", flush=True)
-                self.sequence_input_thread = threading.Thread(
-                    target=self._read_sequence_confirmation,
-                    name="roller-sequence-input", daemon=True)
-                self.sequence_input_thread.start()
+                if self.auto_confirm:
+                    self._begin_two_point_sequence(now_s, automatic=True)
+                else:
+                    self.sequence_state = "WAIT_CONFIRM"
+                    LOG.info("钢球已回中并稳定，请确认后开始题3计时")
+                    print("钢球已在 ±5mm 内稳定超过2s。输入 Y 并回车后开始计时。", flush=True)
+                    self.sequence_input_thread = threading.Thread(
+                        target=self._read_sequence_confirmation,
+                        name="roller-sequence-input", daemon=True)
+                    self.sequence_input_thread.start()
         elif self.sequence_state == "WAIT_CONFIRM":
             try:
                 answer = self.sequence_confirmations.get_nowait()
@@ -221,26 +264,21 @@ class RollerControlDaemon:
                 self.sequence_stable_since_s = None
                 print("未确认，继续回中；稳定后会再次提示。", flush=True)
                 return
-            self.sequence_started_s = now_s
-            self.sequence_state = "TO_POSITIVE"
-            self.sequence_target_mm = 50.0
-            self.sequence_stable_since_s = None
-            self.controller.reset()
-            print("已开始计时，前往 +5cm。", flush=True)
+            self._begin_two_point_sequence(now_s, automatic=False)
         elif (self.sequence_state == "TO_POSITIVE"
-              and abs(ball.position_mm - self.sequence_target_mm) <= 10.0):
+              and (abs(ball.position_mm - self.sequence_target_mm) <= POSITIVE_REVERSAL_WINDOW_MM
+                   and abs(ball.velocity_mm_s) <= POSITIVE_REVERSAL_VELOCITY_MM_S)):
             self.sequence_state = "TO_NEGATIVE"
             self.sequence_target_mm = -50.0
             self.sequence_stable_since_s = None
             self.controller.reset()
-            print("已到达 +5cm，立即返回 -5cm。", flush=True)
+            print("已到达 +5cm 且速度接近零，开始平滑返回 -5cm。", flush=True)
         elif self.sequence_state == "TO_NEGATIVE" and held_s >= 0.20:
             elapsed = 0.0 if self.sequence_started_s is None else now_s - self.sequence_started_s
             self.sequence_state = "COMPLETE"
             timeout_note = "（已超过5s）" if self.sequence_timed_out else ""
-            print(f"-5cm 已稳定，计时结束：{elapsed:.3f}s{timeout_note}", flush=True)
-            LOG.info("题3两点运动完成，总时长 %.3fs%s", elapsed, timeout_note)
-            self.stop_event.set()
+            print(f"-5cm 已稳定，计时结束：{elapsed:.3f}s{timeout_note}；继续保持 -5cm。", flush=True)
+            LOG.info("题3两点运动完成，总时长 %.3fs%s；继续保持 -5cm", elapsed, timeout_note)
 
     def _sequence_timeout(self, now_s: float) -> None:
         elapsed = 0.0 if self.sequence_started_s is None else now_s - self.sequence_started_s
@@ -266,6 +304,8 @@ class RollerControlDaemon:
             return
         self.last_safe = True
         LOG.warning("roller controller safety stop: %s", reason)
+        if reason == "ball state timeout" and not self.received_ball_state:
+            print("等待有效钢球识别数据；请确认网页持续显示钢球误差。", flush=True)
         if self.armed or self.dry_run:
             self.actuator.stop()
 
@@ -276,7 +316,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--control-config", default=None)
     parser.add_argument("--target-mm", type=float, default=None)
     parser.add_argument("--arm", action="store_true", help="allow the configured motor to be enabled")
-    parser.add_argument("--dry-run", action="store_true", help="print Y42 CAN frames without sending them")
+    parser.add_argument("--dry-run", action="store_true", help="不发送 CAN，仅运行控制逻辑；显示报文请再加 --show-tx")
+    parser.add_argument("--show-tx", action="store_true", help="显示发送的 CAN TX 帧（默认不显示）")
+    parser.add_argument("--home", action="store_true", help="启动控制前执行一次绝对坐标回零；需要 --arm")
+    parser.add_argument("--auto-confirm", action="store_true",
+                        help="调参用：回中稳定后自动确认；默认仍等待人工输入 Y")
     parser.add_argument("--telemetry-hz", type=float, default=0,
                         help="log vision/IMU/Y42 feedback at 0..20 Hz; 0 disables feedback")
     parser.add_argument("--task", type=int, choices=(1, 2), default=1,
@@ -293,7 +337,9 @@ def main() -> int:
         control_path = args.control_config or str(Path(args.config_dir) / "roller_control.yaml")
         daemon = RollerControlDaemon(app_config, load_roller_control(control_path), armed=args.arm,
                                      dry_run=args.dry_run, target_mm=args.target_mm,
-                                     telemetry_hz=args.telemetry_hz, task=args.task)
+                                     telemetry_hz=args.telemetry_hz, task=args.task,
+                                     show_tx=args.show_tx, home=args.home,
+                                     auto_confirm=args.auto_confirm)
     except Exception as error:
         logging.basicConfig(level=logging.INFO)
         LOG.error("safe startup failure: %s", error)
