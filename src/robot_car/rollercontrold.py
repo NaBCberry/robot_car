@@ -201,9 +201,13 @@ class RollerControlDaemon:
             position = "-" if self.motor_position_deg is None else f"{self.motor_position_deg:.2f}"
             status = "-" if self.motor_status is None else f"0x{self.motor_status:02X}"
             home = "-" if self.motor_home_status is None else f"0x{self.motor_home_status:02X}"
-            LOG.info("telemetry ball=%.1fmm v=%.1fmm/s tube=%.2fdeg target=%.2fdeg cmd=%.2fdeg "
+            phase = self.sequence_state if self.task == 2 else "CONTINUOUS"
+            ball_target = self.sequence_target_mm if self.task == 2 else self.target_mm
+            elapsed = "-" if self.sequence_started_s is None else f"{now_s - self.sequence_started_s:.3f}s"
+            LOG.info("telemetry phase=%s ball_target=%.1fmm elapsed=%s ball=%.1fmm v=%.1fmm/s "
+                     "tube=%.2fdeg target=%.2fdeg cmd=%.2fdeg "
                      "motor=%sdeg status=%s home=%s",
-                     ball.position_mm, ball.velocity_mm_s, tube_angle_deg,
+                     phase, ball_target, elapsed, ball.position_mm, ball.velocity_mm_s, tube_angle_deg,
                      command.target_tube_angle_deg, command.target_motor_angle_deg,
                      position, status, home)
 
