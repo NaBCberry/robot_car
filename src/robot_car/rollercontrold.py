@@ -44,7 +44,9 @@ class RollerControlDaemon:
             gyro_sign=int(imu.get("gyro_sign", 1)), gyro_weight=float(imu.get("gyro_weight", 0.98)),
             pitch_zero_offset_deg=float(imu.get("pitch_zero_offset_deg", 0.0)),
             gyro_bias_raw=float(imu.get("gyro_bias_raw", 0.0)),
-            gyro_correction_time_constant_s=imu.get("gyro_correction_time_constant_s"))
+            gyro_correction_time_constant_s=imu.get("gyro_correction_time_constant_s"),
+            mahony_kp=imu.get("mahony_kp"), mahony_ki=float(imu.get("mahony_ki", 0.0)),
+            mahony_integral_limit_dps=float(imu.get("mahony_integral_limit_dps", 5.0)))
         self.ball_estimator = BallStateEstimator(
             velocity_alpha=float(estimator.get("velocity_alpha", 0.35)),
             acceleration_alpha=float(estimator.get("acceleration_alpha", 0.20)),

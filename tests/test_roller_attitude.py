@@ -44,6 +44,15 @@ class PitchEstimatorTests(unittest.TestCase):
         estimate = estimator.update(sample(1.5, accel_x=8192, accel_z=8192))
         self.assertAlmostEqual(estimate.pitch_deg, 45.0 * (1.0 - math.exp(-1.0)), places=3)
 
+    def test_mahony_proportional_term_quickly_corrects_gravity_error(self):
+        estimator = PitchEstimator(slope_accel_axis="x", gravity_accel_axis="z", gyro_axis="y",
+                                   mahony_kp=8.0)
+        estimator.update(sample(1.0, accel_x=0, accel_z=8192))
+        estimate = estimator.update(sample(1.1, accel_x=8192, accel_z=8192))
+        self.assertAlmostEqual(estimate.pitch_deg, math.degrees(0.8 * math.sin(math.pi / 4)),
+                               places=3)
+        self.assertEqual(estimate.pitch_rate_deg_s, 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()
