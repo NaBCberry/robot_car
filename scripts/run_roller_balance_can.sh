@@ -25,7 +25,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "${task_mode}" ]]; then
-    printf '选择滚珠动作：\n1. 控制钢球位于中心\n2. 回中稳定后执行 +5cm -> -5cm（限时5s）\n选择 [1/2]: '
+    printf '选择滚珠动作：\n1. 控制钢球位于中心\n2. 回中稳定后执行 +5cm -> -5cm（目标5s，超时仅提示）\n选择 [1/2]: '
     read -r task_mode
 fi
 case "${task_mode}" in

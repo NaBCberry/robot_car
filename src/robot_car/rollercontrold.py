@@ -72,6 +72,7 @@ class RollerControlDaemon:
         self.sequence_stable_since_s: float | None = None
         self.sequence_prompted = False
         self.sequence_started_s: float | None = None
+        self.sequence_timed_out = False
         self.sequence_confirmations: Queue[str] = Queue()
         self.sequence_input_thread: threading.Thread | None = None
         if telemetry_hz < 0 or telemetry_hz > 20:
@@ -133,9 +134,9 @@ class RollerControlDaemon:
     def _control(self, now_s: float, tube_angle_deg: float) -> None:
         if (self.task == 2 and self.sequence_state in {"TO_POSITIVE", "TO_NEGATIVE"}
                 and self.sequence_started_s is not None
-                and now_s - self.sequence_started_s > 5.0):
+                and now_s - self.sequence_started_s > 5.0
+                and not self.sequence_timed_out):
             self._sequence_timeout(now_s)
-            return
         ball = self.ball
         now_ms = int(now_s * 1000)
         if ball is None or now_ms - ball.timestamp_ms > self.state_timeout_ms:
@@ -196,9 +197,9 @@ class RollerControlDaemon:
                   else now_s - self.sequence_stable_since_s)
         if (self.sequence_state in {"TO_POSITIVE", "TO_NEGATIVE"}
                 and self.sequence_started_s is not None
-                and now_s - self.sequence_started_s > 5.0):
+                and now_s - self.sequence_started_s > 5.0
+                and not self.sequence_timed_out):
             self._sequence_timeout(now_s)
-            return
         if self.sequence_state == "CENTERING":
             if held_s >= 0.30 and not self.sequence_prompted:
                 self.sequence_prompted = True
@@ -226,25 +227,26 @@ class RollerControlDaemon:
             self.sequence_stable_since_s = None
             self.controller.reset()
             print("已开始计时，前往 +5cm。", flush=True)
-        elif self.sequence_state == "TO_POSITIVE" and held_s >= 0.20:
+        elif (self.sequence_state == "TO_POSITIVE"
+              and abs(ball.position_mm - self.sequence_target_mm) <= 10.0):
             self.sequence_state = "TO_NEGATIVE"
             self.sequence_target_mm = -50.0
             self.sequence_stable_since_s = None
             self.controller.reset()
-            print("+5cm 已稳定，前往 -5cm。", flush=True)
+            print("已到达 +5cm，立即返回 -5cm。", flush=True)
         elif self.sequence_state == "TO_NEGATIVE" and held_s >= 0.20:
             elapsed = 0.0 if self.sequence_started_s is None else now_s - self.sequence_started_s
             self.sequence_state = "COMPLETE"
-            print(f"-5cm 已稳定，计时结束：{elapsed:.3f}s", flush=True)
-            LOG.info("题3两点运动完成，总时长 %.3fs", elapsed)
+            timeout_note = "（已超过5s）" if self.sequence_timed_out else ""
+            print(f"-5cm 已稳定，计时结束：{elapsed:.3f}s{timeout_note}", flush=True)
+            LOG.info("题3两点运动完成，总时长 %.3fs%s", elapsed, timeout_note)
             self.stop_event.set()
 
     def _sequence_timeout(self, now_s: float) -> None:
         elapsed = 0.0 if self.sequence_started_s is None else now_s - self.sequence_started_s
-        self.sequence_state = "COMPLETE"
-        print(f"题3两点运动超过5s，已停止（用时 {elapsed:.3f}s）。", flush=True)
+        self.sequence_timed_out = True
+        print(f"题3两点运动已超过5s（当前 {elapsed:.3f}s），继续运行至 -5cm。", flush=True)
         LOG.warning("题3两点运动超时：%.3fs", elapsed)
-        self.stop_event.set()
 
     def _receive_motor_feedback(self) -> None:
         if not self.feedback_enabled:
@@ -278,7 +280,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--telemetry-hz", type=float, default=0,
                         help="log vision/IMU/Y42 feedback at 0..20 Hz; 0 disables feedback")
     parser.add_argument("--task", type=int, choices=(1, 2), default=1,
-                        help="1: continuously hold center; 2: center then +50/-50 cm test")
+                        help="1: continuously hold center; 2: center then +50/-50 cm test (timeout reports only)")
     return parser.parse_args()
 
 
