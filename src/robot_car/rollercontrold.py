@@ -28,6 +28,7 @@ class RollerControlDaemon:
         self.app_config = app_config
         self.control_config = control_config
         self.armed = armed and bool(control_config.get("enabled", False))
+        self.dry_run = dry_run
         self.stop_event = threading.Event()
         imu = control_config["imu"]
         motor = control_config["motor"]
@@ -66,7 +67,8 @@ class RollerControlDaemon:
         self.actuator.open()
         if self.armed:
             self.actuator.enable()
-        LOG.info("roller CAN controller started; armed=%s target_mm=%.1f", self.armed, self.target_mm)
+        LOG.info("roller CAN controller started; armed=%s dry_run=%s target_mm=%.1f",
+                 self.armed, self.dry_run, self.target_mm)
         try:
             while not self.stop_event.is_set():
                 self._receive_event()
@@ -104,7 +106,7 @@ class RollerControlDaemon:
         self.last_safe = False
         command = self.controller.step(self.target_mm, ball, tube_angle_deg,
                                        self.command_interval_s)
-        if self.armed:
+        if self.armed or self.dry_run:
             self.actuator.move_absolute(command.target_motor_angle_deg, speed_rpm=self.speed_rpm,
                                         acceleration_rpm_s=self.acceleration_rpm_s,
                                         deceleration_rpm_s=self.deceleration_rpm_s)
@@ -117,7 +119,7 @@ class RollerControlDaemon:
             return
         self.last_safe = True
         LOG.warning("roller controller safety stop: %s", reason)
-        if self.armed:
+        if self.armed or self.dry_run:
             self.actuator.stop()
 
 

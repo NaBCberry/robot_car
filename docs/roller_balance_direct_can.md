@@ -56,10 +56,13 @@ flowchart LR
 ```bash
 cd /userdata/rdkstudio/projects/robot_car
 ./scripts/probe_icm42688.sh 1
+./scripts/monitor_icm42688.sh --samples 20
 ./scripts/run_roller_balance_can.sh --dry-run
 ```
 
 该命令会启动现有网页和视觉服务；只有 ICM42688 已被识别后，才会输出待发送的 CAN 帧。
+`monitor_icm42688.sh` 不启动视觉、CAN 或电机，用于确认静止噪声、安装轴和正负方向；让水管
+向预期正方向缓慢抬起时，`pitch_deg` 应单调增加，否则调整 `imu` 的轴或符号配置。
 确认方向、角度范围和 Y42 报文后，再将配置的 `enabled` 改为 `true`，车轮悬空、急停有效时
 执行：
 
