@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import errno
 import fcntl
 import os
 import struct
@@ -19,6 +20,7 @@ GYRO_CONFIG0 = 0x4F
 ACCEL_CONFIG0 = 0x50
 ACCEL_DATA_X1 = 0x1F
 I2C_SLAVE = 0x0703
+TRANSIENT_I2C_ERRNOS = {errno.EIO, errno.EREMOTEIO, errno.ETIMEDOUT}
 
 
 class SpiDevice(Protocol):
@@ -98,6 +100,7 @@ class Icm42688:
                  i2c_address: int = 0x68, speed_hz: int = 1_000_000,
                  mode: int = 3, spi_factory: Callable[[], SpiDevice] | None = None,
                  i2c_factory: Callable[[], I2cDevice] | None = None,
+                 i2c_retries: int = 3, i2c_retry_delay_ms: int = 2,
                  monotonic: Callable[[], float] = time.monotonic) -> None:
         if transport not in ("spi", "i2c"):
             raise ValueError("ICM42688 transport must be spi or i2c")
@@ -105,6 +108,8 @@ class Icm42688:
             raise ValueError("SPI ICM42688 requires a chip select")
         if transport == "i2c" and not 0x03 <= i2c_address <= 0x77:
             raise ValueError("I2C address is invalid")
+        if i2c_retries < 0 or i2c_retry_delay_ms < 0:
+            raise ValueError("I2C retry settings must not be negative")
         self.bus = bus
         self.chip_select = chip_select
         self.transport = transport
@@ -113,6 +118,8 @@ class Icm42688:
         self.mode = mode
         self.spi_factory = spi_factory
         self.i2c_factory = i2c_factory
+        self.i2c_retries = i2c_retries
+        self.i2c_retry_delay_s = i2c_retry_delay_ms / 1000.0
         self.monotonic = monotonic
         self.spi: SpiDevice | None = None
         self.i2c: I2cDevice | None = None
@@ -170,7 +177,7 @@ class Icm42688:
                 raise RuntimeError("ICM42688 returned an incomplete sample")
             data = bytes(values[1:])
         else:
-            data = device.read_register(ACCEL_DATA_X1, 12)
+            data = self._read_i2c_sample(device)
         decoded = struct.unpack(">hhhhhh", data)
         return ImuSample(self.monotonic(), 0, *decoded[0:3], *decoded[3:6])
 
@@ -184,6 +191,17 @@ class Icm42688:
         if len(values) != 1:
             raise RuntimeError("ICM42688 returned an incomplete I2C register read")
         return values[0]
+
+    def _read_i2c_sample(self, device: I2cDevice) -> bytes:
+        """Retry brief I2C NACK/timeouts without hiding persistent bus faults."""
+        for attempt in range(self.i2c_retries + 1):
+            try:
+                return device.read_register(ACCEL_DATA_X1, 12)
+            except OSError as error:
+                if error.errno not in TRANSIENT_I2C_ERRNOS or attempt >= self.i2c_retries:
+                    raise
+                time.sleep(self.i2c_retry_delay_s)
+        raise RuntimeError("unreachable I2C retry state")
 
     def _write_register(self, address: int, value: int, device: Any) -> None:
         if not 0 <= value <= 0xFF:
@@ -224,6 +242,8 @@ def sensor_from_config(imu: Mapping[str, Any]) -> Icm42688:
         address = int(address, 0) if isinstance(address, str) else int(address)
         return Icm42688(int(imu.get("i2c_bus", 0)), transport="i2c", i2c_address=address,
                         speed_hz=int(imu.get("speed_hz", 400_000)),
+                        i2c_retries=int(imu.get("i2c_retries", 3)),
+                        i2c_retry_delay_ms=int(imu.get("i2c_retry_delay_ms", 2)),
                         monotonic=time.monotonic)
     return Icm42688(int(imu["spi_bus"]), int(imu["chip_select"]), transport="spi",
                     speed_hz=int(imu.get("speed_hz", 1_000_000)),

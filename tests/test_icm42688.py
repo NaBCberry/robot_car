@@ -1,4 +1,5 @@
 import unittest
+import errno
 
 from robot_car.roller_control.icm42688 import (ACCEL_CONFIG0, ACCEL_DATA_X1,
                                                 GYRO_CONFIG0, PWR_MGMT0, Icm42688, WHO_AM_I)
@@ -30,9 +31,10 @@ class FakeSpi:
 
 
 class FakeI2c:
-    def __init__(self, identity=0x47, sample=None):
+    def __init__(self, identity=0x47, sample=None, transient_sample_failures=0):
         self.identity = identity
         self.sample = sample or [0] * 12
+        self.transient_sample_failures = transient_sample_failures
         self.opened = None
         self.closed = False
         self.writes = []
@@ -47,6 +49,9 @@ class FakeI2c:
         if address == WHO_AM_I:
             return bytes((self.identity,))
         if address == ACCEL_DATA_X1:
+            if self.transient_sample_failures:
+                self.transient_sample_failures -= 1
+                raise OSError(errno.EREMOTEIO, "Remote I/O error")
             return bytes(self.sample)
         return bytes(length)
 
@@ -97,6 +102,15 @@ class Icm42688Tests(unittest.TestCase):
                                        (GYRO_CONFIG0, 0x48)])
         sensor.close()
         self.assertTrue(fake.closed)
+
+    def test_i2c_sample_retries_a_transient_remote_io_error(self):
+        fake = FakeI2c(sample=[0] * 12, transient_sample_failures=2)
+        sensor = Icm42688(0, transport="i2c", i2c_address=0x69,
+                          i2c_factory=lambda: fake, i2c_retries=2,
+                          i2c_retry_delay_ms=0)
+        sensor.open()
+        self.assertEqual(sensor.sample().accel_y_raw, 0)
+        self.assertEqual(fake.transient_sample_failures, 0)
 
 
 if __name__ == "__main__":
