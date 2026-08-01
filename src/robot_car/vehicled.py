@@ -38,6 +38,29 @@ DIRECT_ROLLER_ACTIONS = {
 }
 
 
+def build_action_status_payload(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    """Build the bounded ACTION_STATUS payload sent to MSPM0."""
+    action_id = snapshot["action_id"]
+    if action_id is None:
+        action_id = snapshot["last_action_id"]
+    return {
+        "action_id": action_id,
+        "status": str(snapshot["status"]),
+        "target_mm": snapshot["target_mm"],
+        "target_revision": snapshot["target_revision"],
+        "request_id": snapshot["request_id"],
+        "reason": _truncate_utf8(str(snapshot["reason"]), 48),
+    }
+
+
+def _truncate_utf8(value: str, max_bytes: int) -> str:
+    """Keep JSON status detail bounded without splitting UTF-8 characters."""
+    encoded = value.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return value
+    return encoded[:max_bytes].decode("utf-8", errors="ignore")
+
+
 def build_transport(config: Dict[str, Any], override: str | None) -> Transport:
     transport_config = config["transport"]
     kind = override or str(transport_config.get("type", "fake"))
@@ -103,7 +126,8 @@ class VehicleDaemon:
                         break
                     try:
                         self.request_action(request["action_id"], request.get("parameters"),
-                                            source="uart", now_ms=now_ms)
+                                            source="uart", now_ms=now_ms,
+                                            request_id=request.get("request_id"))
                     except (KeyError, TypeError, ValueError, RuntimeError) as error:
                         LOG.warning("rejected action request: %s", error)
                 with self.action_lock:
@@ -121,17 +145,12 @@ class VehicleDaemon:
                         telemetry, telemetry_snapshot["updated_monotonic_ms"], now_ms)
                     action_snapshot = self.action_dispatcher.snapshot(now_ms).to_dict()
                 action_token = (action_snapshot["action_id"], action_snapshot["status"],
-                                action_snapshot["phase"], action_snapshot["reason"])
+                                action_snapshot["phase"], action_snapshot["reason"],
+                                action_snapshot["target_mm"], action_snapshot["target_revision"],
+                                action_snapshot["request_id"])
                 if action_token != self._last_action_report:
                     try:
-                        # Keep the wire event below the protocol's 255-byte
-                        # payload limit.  Timestamps and elapsed time remain
-                        # available in the local TUI and are not needed by M0.
-                        wire_action_status = {
-                            key: action_snapshot[key] for key in (
-                                "action_id", "status", "source", "phase", "target_mm",
-                                "last_remote_action_id", "ball_error_mm", "reason")
-                        }
+                        wire_action_status = build_action_status_payload(action_snapshot)
                         self.gateway.send_event("ACTION_STATUS", wire_action_status, 1000,
                                                 expect_ack=False)
                         self._last_action_report = action_token
@@ -195,8 +214,13 @@ class VehicleDaemon:
                      self.gateway.stats)
 
     def request_action(self, action_id: int, parameters: Dict[str, Any] | None = None,
-                       *, source: str = "tui", now_ms: int | None = None) -> None:
+                       *, source: str = "tui", now_ms: int | None = None,
+                       request_id: int | None = None) -> None:
         action = ActionId(int(action_id))
+        if action == ActionId.LINE_LAP_BALANCE_TARGET and (parameters or {}).get("operation") == "set":
+            self._request_target_capture(parameters, source=source, now_ms=now_ms,
+                                         request_id=request_id)
+            return
         if action not in DIRECT_ROLLER_ACTIONS:
             sweep_stopped = self._stop_roller_sweep()
             if not sweep_stopped and action != ActionId.STOP:
@@ -207,16 +231,29 @@ class VehicleDaemon:
             self._request_roller_home(parameters, source=source, now_ms=now_ms)
             return
         if action in DIRECT_ROLLER_ACTIONS:
-            self._request_direct_roller_action(action, parameters, source=source, now_ms=now_ms)
+            self._request_direct_roller_action(action, parameters, source=source, now_ms=now_ms,
+                                               request_id=request_id)
             return
         with self.action_lock:
             self.action_dispatcher.request(
                 action_id, parameters, source=source, now_ms=now_ms,
-                current_ball_error_mm=self.action_dispatcher.ball_error_mm)
+                current_ball_error_mm=self.action_dispatcher.ball_error_mm, request_id=request_id)
+
+    def _request_target_capture(self, parameters: Dict[str, Any] | None, *, source: str,
+                                now_ms: int | None, request_id: int | None) -> None:
+        if self._roller_home_active():
+            raise RuntimeError("roller motor home is in progress")
+        if self._roller_sweep_active() and not self._stop_roller_sweep():
+            raise RuntimeError("direct roller controller has not released the CAN bus")
+        with self.action_lock:
+            self.action_dispatcher.request(ActionId.LINE_LAP_BALANCE_TARGET, parameters,
+                                           source=source, now_ms=now_ms,
+                                           current_ball_error_mm=self.action_dispatcher.ball_error_mm,
+                                           request_id=request_id)
 
     def _request_direct_roller_action(self, action: ActionId,
                                       parameters: Dict[str, Any] | None, *, source: str,
-                                      now_ms: int | None) -> None:
+                                      now_ms: int | None, request_id: int | None) -> None:
         if self._roller_home_active():
             raise RuntimeError("roller motor home is in progress")
         if self._roller_sweep_active():
@@ -228,7 +265,8 @@ class VehicleDaemon:
         with self.action_lock:
             self.action_dispatcher.request(action, parameters, source=source,
                                            now_ms=now_ms,
-                                           current_ball_error_mm=self.action_dispatcher.ball_error_mm)
+                                           current_ball_error_mm=self.action_dispatcher.ball_error_mm,
+                                           request_id=request_id)
             task = 2 if action == ActionId.ROLLER_SWEEP else 1
             target_mm = None if task == 2 else self.action_dispatcher.target_mm
             controller = RollerControlDaemon(

@@ -3,8 +3,11 @@ import unittest
 from unittest.mock import patch
 
 from robot_car.decision.action_dispatcher import ActionId
+from robot_car.perception.events import VisionEvent
+from robot_car.protocol.framing import MAX_PAYLOAD
+from robot_car.protocol.messages import pack_json
 from robot_car.vehicle_link.fake_transport import FakeTransport
-from robot_car.vehicled import VehicleDaemon
+from robot_car.vehicled import VehicleDaemon, build_action_status_payload
 
 
 class FakeRollerController:
@@ -41,10 +44,16 @@ class VehicleDaemonDirectRollerTests(unittest.TestCase):
         self.assertEqual((first.task, first.target_mm), (1, 0.0))
 
         daemon.request_action(ActionId.LINE_LAP_BALANCE_TARGET,
-                              {"target_mm": 35}, now_ms=1100)
+                              {"operation": "set"}, now_ms=1100)
+        self.assertTrue(first.stop_event.is_set())
+        self.assertEqual(len(FakeRollerController.instances), 1)
+        daemon.action_dispatcher.handle_event(
+            VisionEvent(1101, "roller_balance", "BALL_BALANCE_STATE", 0.95,
+                        {"error_mm": 35}, 1, 120, 1280, 720), now_ms=1101)
+        daemon.request_action(ActionId.LINE_LAP_BALANCE_TARGET,
+                              {"operation": "run", "target_revision": 1}, now_ms=1200)
         second = FakeRollerController.instances[-1]
         self.assertEqual((second.task, second.target_mm), (1, 35.0))
-        self.assertTrue(first.stop_event.is_set())
         self.assertEqual(daemon.action_dispatcher.motion_mode().name, "LINE_FOLLOW")
         daemon._stop_roller_sweep()
 
@@ -62,6 +71,20 @@ class VehicleDaemonDirectRollerTests(unittest.TestCase):
         self.assertEqual(controller.feedforward, 36)
         daemon._update_direct_roller_feedforward({"roller_feedforward_mm_s2": 36}, 1000, 1501)
         self.assertEqual(controller.feedforward, 0.0)
+
+    def test_action_status_payload_stays_within_the_protocol_limit(self):
+        payload = build_action_status_payload({
+            "action_id": None,
+            "last_action_id": 6,
+            "status": "COMPLETE",
+            "target_mm": -1000.0,
+            "target_revision": 65535,
+            "request_id": 65535,
+            "reason": "\u6d4b\u8bd5" * 100,
+        })
+        event = {"event_type": "ACTION_STATUS", "payload": payload, "valid_for_ms": 1000}
+        self.assertEqual(payload["action_id"], 6)
+        self.assertLessEqual(len(pack_json(event)), MAX_PAYLOAD)
 
 
 if __name__ == "__main__":
