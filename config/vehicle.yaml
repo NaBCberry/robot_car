@@ -34,14 +34,12 @@ vehicle:
     # ACTION_REQUEST action_id=1 is rejected unless this and roller_control.yaml enabled are true.
     enabled: false
     timeout_ms: 30000
-    # Keep holding torque after a verified successful absolute-zero home.
-    hold_enabled: true
   status_led:
     # Eight WS2812 pixels on SPI1 MOSI (40-pin header pin 19), reserved for status only.
     enabled: true
     device: /dev/spidev1.0
     count: 8
-    brightness: 0.10       # Visible status level; never exceed 10% from this controller.
+    brightness: 0.40      # 40% visible status level.
     refresh_hz: 8
   actions:
     # Requests are accepted from UART and TUI, then pass through the safety watchdogs.
