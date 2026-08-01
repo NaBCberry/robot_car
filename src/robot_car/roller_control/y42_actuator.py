@@ -68,6 +68,18 @@ class Y42Actuator:
     def stop(self) -> None:
         self._send("stop")
 
+    def hold_current_position(self, *, speed_rpm: float, acceleration_rpm_s: int,
+                              deceleration_rpm_s: int, timeout_s: float = 0.05) -> bool:
+        """Lock the present shaft position without releasing motor enable."""
+        try:
+            position = self.read_position_deg(timeout_s=timeout_s)
+            self.move_absolute(position, speed_rpm=speed_rpm,
+                               acceleration_rpm_s=acceleration_rpm_s,
+                               deceleration_rpm_s=deceleration_rpm_s)
+        except RuntimeError:
+            return False
+        return True
+
     def move_absolute(self, motor_angle_deg: float, *, speed_rpm: float,
                       acceleration_rpm_s: int, deceleration_rpm_s: int,
                       confirm: bool = False, confirm_timeout_s: float = 2.0) -> float:

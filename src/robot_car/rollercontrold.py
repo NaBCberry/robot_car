@@ -337,11 +337,15 @@ class RollerControlDaemon:
         if self.last_safe:
             return
         self.last_safe = True
-        LOG.warning("roller controller safety stop: %s", reason)
+        LOG.warning("roller controller safety hold: %s", reason)
         if reason == "ball state timeout" and not self.received_ball_state:
             self._announce("等待有效钢球识别数据；请确认网页持续显示钢球误差。")
         if self.armed or self.dry_run:
-            self.actuator.stop()
+            if not self.actuator.hold_current_position(
+                    speed_rpm=self.speed_rpm, acceleration_rpm_s=self.acceleration_rpm_s,
+                    deceleration_rpm_s=self.deceleration_rpm_s):
+                LOG.warning("roller safety hold failed; falling back to immediate stop")
+                self.actuator.stop()
 
 
 def parse_args() -> argparse.Namespace:

@@ -7,6 +7,7 @@ from collections import deque
 import logging
 import time
 from typing import Any, Dict
+import unicodedata
 
 
 ACTION_NAMES = {
@@ -113,32 +114,39 @@ def _draw(screen: Any, daemon: Any, roller_config: Dict[str, Any], input_buffer:
     remote_action_id = action.get("last_remote_action_id")
     active_action = "-" if action_id is None else str(action_id)
     remote_action = "-" if remote_action_id is None else str(remote_action_id)
-    screen.addnstr(0, 0, "RDK vehicle control TUI", max(1, curses.COLS - 1))
+    width = max(1, curses.COLS - 1)
+    screen.addnstr(0, 0, "RDK vehicle control TUI", width)
     status = (f"PID p={_pid(pid)} v={_pid(vel)} a={_pid(angle)} | "
               f"当前动作={active_action}({ACTION_NAMES.get(action_id, '-')}) "
               f"状态={action.get('status')} 阶段={action.get('phase') or '-'} | "
               f"下位机动作={remote_action} | "
               f"球误差={_number(action.get('ball_error_mm'))}mm | "
               f"UART RX={snapshot['gateway']['received']} ACK={snapshot['gateway']['acks']}")
-    screen.addnstr(1, 0, status, max(1, curses.COLS - 1))
+    status_lines = _wrap_terminal_line(status, width)
+    for row, line in enumerate(status_lines, start=1):
+        if row >= curses.LINES:
+            break
+        screen.addnstr(row, 0, line, width)
+    content_row = 1 + len(status_lines) + 1
     if log_only:
-        screen.addnstr(3, 0, "实时日志（只读；按 Ctrl-C 退出）", max(1, curses.COLS - 1))
-        first_row = 4
+        if content_row < curses.LINES:
+            screen.addnstr(content_row, 0, "实时日志（只读；按 Ctrl-C 退出）", width)
+        first_row = content_row + 1
         available_rows = max(0, curses.LINES - first_row)
-        display_lines = log_lines[-available_rows:] or ("等待日志...",)
-        for offset, line in enumerate(display_lines):
-            screen.addnstr(first_row + offset, 0, line, max(1, curses.COLS - 1))
+        wrapped_logs = [line for entry in log_lines for line in _wrap_terminal_line(entry, width)]
+        display_lines = wrapped_logs[-available_rows:] or ("等待日志...",)
+        for offset, line in enumerate(display_lines[:available_rows]):
+            screen.addnstr(first_row + offset, 0, line, width)
         screen.refresh()
         return
-    screen.addnstr(3, 0, f"动作映射: 0{ACTION_TASKS[0]} | 1{ACTION_TASKS[1]} | {ACTION_TASKS[2]}",
-                   max(1, curses.COLS - 1))
-    screen.addnstr(4, 0, f"动作映射: {ACTION_TASKS[3]} | {ACTION_TASKS[4]} | {ACTION_TASKS[5]} | {ACTION_TASKS[6]}",
-                   max(1, curses.COLS - 1))
-    screen.addnstr(6, 0, "输入动作编号并回车，S=停止，ESC=停止，Q=退出",
-                   max(1, curses.COLS - 1))
-    screen.addnstr(7, 0, f"> {input_buffer}", max(1, curses.COLS - 1))
+    screen.addnstr(content_row, 0, f"动作映射: 0{ACTION_TASKS[0]} | 1{ACTION_TASKS[1]} | {ACTION_TASKS[2]}", width)
+    screen.addnstr(content_row + 1, 0,
+                   f"动作映射: {ACTION_TASKS[3]} | {ACTION_TASKS[4]} | {ACTION_TASKS[5]} | {ACTION_TASKS[6]}",
+                   width)
+    screen.addnstr(content_row + 3, 0, "输入动作编号并回车，S=停止，ESC=停止，Q=退出", width)
+    screen.addnstr(content_row + 4, 0, f"> {input_buffer}", width)
     if snapshot.get("ui_error"):
-        screen.addnstr(8, 0, f"错误: {snapshot['ui_error']}", max(1, curses.COLS - 1))
+        screen.addnstr(content_row + 5, 0, f"错误: {snapshot['ui_error']}", width)
     screen.refresh()
 
 
@@ -148,3 +156,22 @@ def _pid(value: Dict[str, Any]) -> str:
 
 def _number(value: Any) -> str:
     return "-" if value is None else f"{float(value):+.1f}"
+
+
+def _wrap_terminal_line(value: str, width: int) -> list[str]:
+    """Wrap text by terminal columns, including double-width CJK characters."""
+    if width < 1:
+        return [""]
+    lines: list[str] = []
+    current = ""
+    used = 0
+    for character in value:
+        cells = 2 if unicodedata.east_asian_width(character) in {"W", "F"} else 1
+        if current and used + cells > width:
+            lines.append(current)
+            current = ""
+            used = 0
+        current += character
+        used += cells
+    lines.append(current)
+    return lines
