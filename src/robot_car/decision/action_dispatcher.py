@@ -119,23 +119,24 @@ class ActionDispatcher:
         self._stable_since_ms = None
         self.reason = ""
         self.target_mm = None
+        default_timeout_ms = self._default_timeout_ms()
         if action == ActionId.ROLLER_HOME:
             self.phase = "MOTOR_HOME"
-            self.deadline_ms = now + int(parameters.get("timeout_ms", 30000))
+            self.deadline_ms = now + int(parameters.get("timeout_ms", default_timeout_ms))
         elif action == ActionId.ROLLER_SWEEP:
             self.phase = "TO_POSITIVE"
             self.deadline_ms = now + int(parameters.get("timeout_ms", 5000))
             self.target_mm = float(parameters.get("positive_mm", 50.0))
         elif action == ActionId.LINE_LAP_TO_A:
             self.phase = "LINE_LAP"
-            self.deadline_ms = now + int(parameters.get("timeout_ms", 20000))
+            self.deadline_ms = now + int(parameters.get("timeout_ms", default_timeout_ms))
         elif action == ActionId.LINE_TO_B_BALANCE_CENTER:
             self.phase = "TO_B"
-            self.deadline_ms = now + int(parameters.get("timeout_ms", 8000))
+            self.deadline_ms = now + int(parameters.get("timeout_ms", default_timeout_ms))
             self.target_mm = 0.0
         elif action == ActionId.LINE_LAP_BALANCE_CENTER:
             self.phase = "LAP_TO_A"
-            self.deadline_ms = now + int(parameters.get("timeout_ms", 30000))
+            self.deadline_ms = now + int(parameters.get("timeout_ms", default_timeout_ms))
             self.target_mm = 0.0
         elif action == ActionId.LINE_LAP_BALANCE_TARGET:
             operation = parameters.get("operation")
@@ -146,10 +147,13 @@ class ActionDispatcher:
                 self._target_capture_after_ms = now
             elif operation == "run":
                 self.phase = "LAP_TO_A_TARGET"
-                self.deadline_ms = now + int(parameters.get("timeout_ms", 30000))
+                self.deadline_ms = now + int(parameters.get("timeout_ms", default_timeout_ms))
                 self.target_mm = self.saved_target_mm
         if self.deadline_ms <= now:
             raise ValueError("action timeout must be positive")
+
+    def _default_timeout_ms(self) -> int:
+        return int(self.config.get("actions", {}).get("default_timeout_ms", 300000))
 
     def stop(self, reason: str = "stopped", now_ms: Optional[int] = None) -> None:
         self.status = "STOPPED"

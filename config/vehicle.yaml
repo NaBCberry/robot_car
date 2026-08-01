@@ -33,10 +33,10 @@ vehicle:
     # Keep false until this process is the only Y42 CAN controller.
     # ACTION_REQUEST action_id=1 is rejected unless this and roller_control.yaml enabled are true.
     enabled: true
-    timeout_ms: 30000
+    timeout_ms: 300000
     # Keep holding torque after a verified successful absolute-zero home.
     hold_enabled: true
   actions:
     # Requests are accepted from UART and TUI, then pass through the safety watchdogs.
     enabled: true
-    default_timeout_ms: 30000
+    default_timeout_ms: 300000

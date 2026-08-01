@@ -16,6 +16,28 @@ class ActionDispatcherTests(unittest.TestCase):
         self.assertEqual(dispatcher.motion_mode().name, "LINE_FOLLOW")
         self.assertEqual(dispatcher.snapshot(1200).status, "RUNNING")
 
+    def test_general_action_default_timeout_is_five_minutes(self):
+        for action, parameters in (
+                (ActionId.ROLLER_HOME, {}),
+                (ActionId.LINE_LAP_TO_A, {}),
+                (ActionId.LINE_TO_B_BALANCE_CENTER, {}),
+                (ActionId.LINE_LAP_BALANCE_CENTER, {})):
+            dispatcher = ActionDispatcher({})
+            dispatcher.request(action, parameters, now_ms=1000)
+            self.assertEqual(dispatcher.deadline_ms, 301000)
+
+        dispatcher = ActionDispatcher({})
+        dispatcher.saved_target_mm = 10.0
+        dispatcher.target_revision = 1
+        dispatcher.request(ActionId.LINE_LAP_BALANCE_TARGET,
+                           {"operation": "run", "target_revision": 1}, now_ms=1000)
+        self.assertEqual(dispatcher.deadline_ms, 301000)
+
+    def test_explicit_action_timeout_overrides_the_default(self):
+        dispatcher = ActionDispatcher({})
+        dispatcher.request(ActionId.LINE_LAP_TO_A, {"timeout_ms": 2500}, now_ms=1000)
+        self.assertEqual(dispatcher.deadline_ms, 3500)
+
     def test_sweep_changes_targets_and_finishes_after_negative_hold(self):
         dispatcher = ActionDispatcher({"control_enabled": True})
         dispatcher.request(ActionId.ROLLER_SWEEP, now_ms=1000)

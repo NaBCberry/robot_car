@@ -39,8 +39,8 @@ SAFE_DEFAULTS: Dict[str, Any] = {
         },
         "balance": {"enabled": False, "output_only": False, "require_feedback": True,
                     "state_timeout_ms": 120},
-        "roller_home": {"enabled": False, "timeout_ms": 30000, "hold_enabled": True},
-        "actions": {"enabled": True, "default_timeout_ms": 30000},
+        "roller_home": {"enabled": False, "timeout_ms": 300000, "hold_enabled": True},
+        "actions": {"enabled": True, "default_timeout_ms": 300000},
     },
     "transport": {
         "enabled": False,

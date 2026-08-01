@@ -12,15 +12,26 @@ vision_pid=""
 vision_log_dir="${VISION_LOG_DIR:-/userdata/robot-car/logs}"
 vehicle_args=("$@")
 has_transport=false
+interactive_tui=false
+forward_args=()
 for arg in "${vehicle_args[@]}"; do
     case "$arg" in
         --transport|--transport=*)
             has_transport=true
             ;;
+        --tui)
+            interactive_tui=true
+            ;;
+        --tui-log-only)
+            interactive_tui=false
+            ;;
+        *)
+            forward_args+=("$arg")
+            ;;
     esac
 done
 if [[ "$has_transport" == false ]]; then
-    vehicle_args+=(--transport uart)
+    forward_args+=(--transport uart)
 fi
 mkdir -p "$vision_log_dir"
 
@@ -57,4 +68,9 @@ python3 -m robot_car.visiond --config-dir "$config_dir" \
     >"$vision_log_dir/visiond-console.log" 2>&1 &
 vision_pid=$!
 
-python3 -m robot_car.vehicled --config-dir "$config_dir" --tui --tui-log-only "${vehicle_args[@]}"
+# Default to a read-only status/log screen.  Append --tui to select actions.
+tui_args=(--tui)
+if [[ "$interactive_tui" == false ]]; then
+    tui_args+=(--tui-log-only)
+fi
+python3 -m robot_car.vehicled --config-dir "$config_dir" "${tui_args[@]}" "${forward_args[@]}"

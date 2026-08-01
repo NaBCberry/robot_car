@@ -121,7 +121,11 @@ def _draw(screen: Any, daemon: Any, roller_config: Dict[str, Any], input_buffer:
               f"状态={action.get('status')} 阶段={action.get('phase') or '-'} | "
               f"下位机动作={remote_action} | "
               f"球误差={_number(action.get('ball_error_mm'))}mm | "
-              f"UART RX={snapshot['gateway']['received']} ACK={snapshot['gateway']['acks']}")
+              f"UART RX={snapshot['gateway']['received']} "
+              f"({snapshot['gateway'].get('received_rate_hz', 0)}/s) "
+              f"EV={snapshot['gateway'].get('received_cmd_event', 0)} "
+              f"TEL={snapshot['gateway'].get('received_telemetry', 0)} "
+              f"ACK={snapshot['gateway'].get('received_ack', 0)}")
     status_lines = _wrap_terminal_line(status, width)
     for row, line in enumerate(status_lines, start=1):
         if row >= curses.LINES:

@@ -124,6 +124,8 @@ class ProtocolTests(unittest.TestCase):
         transport.inject(encode_frame(ack))
         gateway.poll()
         self.assertEqual(gateway.stats["acks"], 1)
+        self.assertEqual(gateway.stats_snapshot()["received_ack"], 1)
+        self.assertEqual(gateway.stats_snapshot()["received_rate_hz"], 1)
         self.assertNotIn(sequence, gateway.pending)
         first_motion = FrameDecoder().feed(transport.sent[0])[0]
         self.assertEqual(unpack_motion(first_motion.payload)["mode"], MotionMode.DISABLED)

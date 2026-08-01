@@ -22,7 +22,7 @@ imu:
   # Set this to the raw pitch reported while the pipe is at its mechanical zero.
   pitch_zero_offset_deg: 1.799
   # Set this to the selected gyro-axis average while the pipe is stationary.
-  gyro_bias_raw: 116.061
+  gyro_bias_raw: 101.920
   # Single-axis Mahony PI gravity correction. Ki stays disabled until dynamic tuning.
   mahony_kp: 8.0
   mahony_ki: 0.0
@@ -43,8 +43,8 @@ motor:
   deceleration_rpm_s: 100
   # The prior measurements used X-firmware scaling and must not drive this EMM motor.
   soft_limit_firmware: emm
-  soft_limit_min_deg: -33.607
-  soft_limit_max_deg: 53.371
+  soft_limit_min_deg: -30.937
+  soft_limit_max_deg: 46.120
   # Display-only ratio: raw Y42 multi-turn degrees / output-shaft degrees.
   position_deg_per_output_deg: 1.0
 
@@ -52,6 +52,38 @@ estimator:
   velocity_alpha: 0.35
   acceleration_alpha: 0.20
   max_gap_ms: 250
+
+# Vehicle-motion feedforward for tasks 4-6. Keep disabled until the pipe axis,
+# wheel track, and MPU6500 mounting axes have been measured on this vehicle.
+vehicle_motion:
+  enabled: false
+  telemetry_timeout_ms: 150
+  # Chassis forward/lateral components of the tube positive direction.
+  pipe_axis_in_chassis: [1.0, 0.0]
+  # Reverse only after a controlled forward-acceleration sign test.
+  pipe_acceleration_sign: 1
+  wheel_track_mm: 160.0
+  encoder_accel_alpha: 0.35
+  imu_accel_correction_gain: 0.20
+  imu_yaw_correction_gain: 0.35
+  max_acceleration_mm_s2: 3000.0
+  mpu6500:
+    enabled: false
+    i2c_bus: 0
+    i2c_address: 0x68
+    i2c_retries: 2
+    i2c_retry_delay_ms: 2
+    # Map sensor axes to chassis forward, lateral, upward after installation.
+    forward_axis: x
+    lateral_axis: y
+    vertical_axis: z
+    x_sign: 1
+    y_sign: 1
+    z_sign: 1
+    yaw_gyro_axis: z
+    yaw_gyro_sign: 1
+    yaw_gyro_bias_deg_s: 0.0
+    gravity_time_constant_s: 1.0
 
 control:
   # End-to-end verification: a positive visual position error requires a negative tube tilt.
@@ -70,10 +102,10 @@ control:
   feedforward:
     # Disabled until a calibrated vehicle acceleration source is available.
     enabled: true
-    source: telemetry
+    source: vehicle_motion
     gain: 0.0
     limit_mm_s2: 0.0
   # Measured static angle needed to hold the ball at each position. Replace zeros after calibration.
   slope_bias_deg_by_position: [[-115, 0], [0, 0], [115, 0]]
   # Measured crank inverse map: pipe angle (deg) -> Y42 absolute motor angle (deg).
-  motor_deg_by_tube_angle: [[-6.346, -33.602], [-5.782, -29.987], [-5.281, -26.384], [-4.693, -22.67], [-4.067, -19.1], [-3.396, -15.474], [-2.673, -11.893], [-1.901, -8.3], [-1.109, -4.565], [-0.264, -0.972], [0.627, 2.631], [1.476, 6.229], [2.449, 9.948], [3.371, 13.552], [4.289, 17.139], [5.225, 20.748], [6.175, 24.351], [7.109, 28.065], [7.995, 31.657], [8.838, 35.261], [9.666, 38.842], [10.424, 42.446], [11.152, 46.17], [11.822, 49.774], [12.433, 53.366]]
+  motor_deg_by_tube_angle: [[-5.887, -30.97], [-5.36, -27.686], [-4.833, -24.532], [-4.374, -21.27], [-3.727, -18.116], [-3.097, -14.854], [-2.536, -11.711], [-1.741, -8.448], [-1.271, -5.175], [-0.516, -2.043], [0.283, 1.219], [1.057, 4.373], [1.844, 7.635], [2.65, 10.811], [3.488, 14.052], [4.306, 17.194], [5.164, 20.457], [5.925, 23.61], [6.74, 26.884], [7.514, 30.037], [8.319, 33.289], [9.025, 36.552], [9.722, 39.705], [10.398, 42.957], [11.011, 46.11]]

@@ -32,12 +32,15 @@ class VehicleGateway:
         self.telemetry = TelemetryCache()
         self.watchdog = LinkWatchdog(int(vehicle_config.get("link_timeout_ms", 500)))
         self.stats = {"sent": 0, "received": 0, "decode_errors": 0, "acks": 0,
-                      "unknown_acks": 0, "old_sequence": 0}
+                      "unknown_acks": 0, "old_sequence": 0,
+                      "received_cmd_event": 0, "received_telemetry": 0,
+                      "received_ack": 0, "received_fault": 0}
         self.pending: Dict[int, float] = {}
         self.last_remote_sequence: Optional[int] = None
         self.last_action_request: Optional[Dict[str, Any]] = None
         self._action_requests: "Queue[Dict[str, Any]]" = Queue()
         self._seen_action_sequences = deque(maxlen=128)
+        self._received_timestamps: deque[float] = deque()
         self._lock = threading.Lock()
 
     def open(self) -> None:
@@ -131,7 +134,11 @@ class VehicleGateway:
             return
         previous_errors = self.decoder.errors
         for message in self.decoder.feed(data):
+            received_at = time.monotonic()
             self.stats["received"] += 1
+            type_counter = f"received_{message.message_type.name.lower()}"
+            self.stats[type_counter] = self.stats.get(type_counter, 0) + 1
+            self._received_timestamps.append(received_at)
             self.watchdog.feed()
             if self.last_remote_sequence is not None:
                 delta = (message.sequence - self.last_remote_sequence) & 0xFFFF
@@ -140,6 +147,15 @@ class VehicleGateway:
             self.last_remote_sequence = message.sequence
             self._handle(message)
         self.stats["decode_errors"] += self.decoder.errors - previous_errors
+
+    def stats_snapshot(self) -> Dict[str, Any]:
+        """Return counters plus the valid-frame receive rate from the last second."""
+        cutoff = time.monotonic() - 1.0
+        while self._received_timestamps and self._received_timestamps[0] < cutoff:
+            self._received_timestamps.popleft()
+        result = dict(self.stats)
+        result["received_rate_hz"] = len(self._received_timestamps)
+        return result
 
     def _handle(self, message: ProtocolMessage) -> None:
         if message.message_type == MessageType.CMD_EVENT:
