@@ -103,6 +103,11 @@ class RollerControlDaemon:
         self.ball: BallState | None = None
         self.received_ball_state = False
         self.reported_stale_ball_state = False
+        self.last_ball_frame_id: int | None = None
+        self.last_ball_event_age_ms: int | None = None
+        self.accepted_ball_events = 0
+        self.discarded_stale_ball_events = 0
+        self._last_stale_ball_log_ms = 0
         self.last_command_s = 0.0
         self.last_safe = False
         self._feedforward_lock = threading.Lock()
@@ -172,7 +177,14 @@ class RollerControlDaemon:
         if event is None or event.event_type != "BALL_BALANCE_STATE":
             return
         now_ms = time.monotonic_ns() // 1_000_000
+        age_ms = max(0, now_ms - event.timestamp_monotonic_ms)
         if event.is_expired(now_ms):
+            self.discarded_stale_ball_events += 1
+            if now_ms - self._last_stale_ball_log_ms >= 1000:
+                LOG.warning("discarded stale ball event: frame=%d age=%dms ttl=%dms discarded=%d",
+                            event.frame_id, age_ms, event.ttl_ms,
+                            self.discarded_stale_ball_events)
+                self._last_stale_ball_log_ms = now_ms
             if not self.reported_stale_ball_state:
                 self.reported_stale_ball_state = True
                 self._announce("收到钢球视觉数据但已过期；请检查视觉推理延迟和 TTL 配置。")
@@ -180,6 +192,9 @@ class RollerControlDaemon:
         try:
             self.ball = self.ball_estimator.update(event.timestamp_monotonic_ms,
                                                     float(event.payload["error_mm"]))
+            self.last_ball_frame_id = event.frame_id
+            self.last_ball_event_age_ms = age_ms
+            self.accepted_ball_events += 1
             if not self.received_ball_state:
                 self.received_ball_state = True
                 self._announce("已接收滚珠视觉数据，开始回中判定。")
@@ -337,7 +352,15 @@ class RollerControlDaemon:
         if self.last_safe:
             return
         self.last_safe = True
-        LOG.warning("roller controller safety hold: %s", reason)
+        now_ms = time.monotonic_ns() // 1_000_000
+        ball_age_ms = ("-" if self.ball is None else
+                       str(max(0, now_ms - self.ball.timestamp_ms)))
+        received_age_ms = getattr(self, "last_ball_event_age_ms", None)
+        LOG.warning("roller controller safety hold: %s; last_frame=%s age=%sms "
+                    "received_age=%sms accepted=%d stale_discarded=%d", reason,
+                    self.last_ball_frame_id if self.last_ball_frame_id is not None else "-",
+                    ball_age_ms, "-" if received_age_ms is None else received_age_ms,
+                    self.accepted_ball_events, self.discarded_stale_ball_events)
         if reason == "ball state timeout" and not self.received_ball_state:
             self._announce("等待有效钢球识别数据；请确认网页持续显示钢球误差。")
         if self.armed or self.dry_run:

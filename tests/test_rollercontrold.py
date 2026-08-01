@@ -33,6 +33,11 @@ class RollerControlDaemonTests(unittest.TestCase):
         daemon = RollerControlDaemon.__new__(RollerControlDaemon)
         daemon.last_safe = False
         daemon.received_ball_state = True
+        daemon.last_ball_frame_id = None
+        daemon.last_ball_event_age_ms = None
+        daemon.accepted_ball_events = 0
+        daemon.discarded_stale_ball_events = 0
+        daemon.ball = None
         daemon.armed = True
         daemon.dry_run = False
         daemon.speed_rpm = 60
