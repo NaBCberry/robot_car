@@ -17,7 +17,6 @@ from robot_car.decision.motion_target import MotionTarget
 from robot_car.decision.state_machine import VehicleStateMachine, monotonic_ms
 from robot_car.ipc.vision_socket import VisionEventSubscriber
 from robot_car.observability.logging import configure_logging
-from robot_car.observability.status_led import StatusLedController
 from robot_car.roller_control.homing import HomeCancelled, home_from_config_file
 from robot_car.roller_control.config import load_roller_control
 from robot_car.rollercontrold import RollerControlDaemon
@@ -91,7 +90,6 @@ class VehicleDaemon:
         self._roller_sweep: RollerControlDaemon | None = None
         self._roller_sweep_thread: threading.Thread | None = None
         self._last_vision_event_ms: int | None = None
-        self.status_led = StatusLedController(config["vehicle"].get("status_led", {}))
         self.ui_error = ""
         self._last_action_report = None
         self.subscriber = VisionEventSubscriber(config["runtime"]["vision_socket"])
@@ -169,19 +167,6 @@ class VehicleDaemon:
                 link_ok = self.gateway.watchdog.healthy(now_ms, allow_unseen=allow_unseen)
                 self.state_machine.update_safety(link_ok, bool(telemetry.get("estop", False)),
                                                  str(telemetry.get("fault", "")), now_ms)
-                self.status_led.update({
-                    "action": action_snapshot,
-                    "gateway": self.gateway.stats,
-                    "ui_error": self.ui_error,
-                    "recent_vision": (self._last_vision_event_ms is not None
-                                      and now_ms - self._last_vision_event_ms
-                                      <= int(self.config["vehicle"].get("vision_timeout_ms", 500))),
-                    "control_enabled": bool(self.config["vehicle"].get("control_enabled", False)),
-                    "balance_enabled": bool(self.config["vehicle"].get("balance", {}).get("enabled", False)),
-                    "fault": (self.state_machine.state.value in {"FAILSAFE", "E_STOP", "FAULT"}
-                              or bool(telemetry.get("estop", False))
-                              or bool(telemetry.get("fault", ""))),
-                })
                 now = time.monotonic()
                 if now >= next_send:
                     if heartbeat_enabled:
@@ -207,7 +192,6 @@ class VehicleDaemon:
                     next_send = now + interval
         finally:
             self._stop_roller_sweep()
-            self.status_led.close()
             self.subscriber.close()
             self.gateway.close()
             LOG.info("vehicled stopped; state=%s stats=%s", self.state_machine.state.value,
