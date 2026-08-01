@@ -8,9 +8,9 @@ state_timeout_ms: 300
 
 imu:
   transport: i2c
-  i2c_bus: 0
+  i2c_bus: 5
   i2c_address: 0x69
-  # I2C standard-mode/fast-mode clock; lower to 100000 if wiring is long or noisy.
+  # Linux I2C clock is configured by the board device tree; this field does not change it.
   speed_hz: 400000
   # The module z axis is along the pipe; y is upward when the pipe is level.
   slope_accel_axis: z
