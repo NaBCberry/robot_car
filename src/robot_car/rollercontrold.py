@@ -72,7 +72,10 @@ class RollerControlDaemon:
         if not isinstance(two_point, dict):
             raise ValueError("roller two_point configuration must be a mapping")
         self.two_point = two_point
-        self.controller = build_controller(control_config, pid_profile=two_point if task == 2 else None)
+        self.center_controller = build_controller(control_config)
+        self.two_point_controller = build_controller(control_config, pid_profile=two_point)
+        self.controller = (self.two_point_controller if task == 2 and start_immediately
+                           else self.center_controller)
         self.actuator = Y42Actuator(interface=str(motor["can_interface"]),
                                     address=int(motor["address"]),
                                     firmware=str(motor.get("firmware", "x")),
@@ -89,6 +92,7 @@ class RollerControlDaemon:
                                                                self.acceleration_rpm_s))
         self.two_point_deceleration_rpm_s = int(two_point.get("deceleration_rpm_s",
                                                                self.deceleration_rpm_s))
+        self.positive_drive_target_mm = float(two_point.get("positive_drive_target_mm", 50.0))
         self.positive_reversal_min_mm = float(two_point.get("positive_reversal_min_mm",
                                                              POSITIVE_REVERSAL_MIN_MM))
         self.positive_reversal_max_mm = float(two_point.get("positive_reversal_max_mm",
@@ -103,6 +107,8 @@ class RollerControlDaemon:
                                                         FINAL_STABLE_HOLD_S))
         if (self.two_point_speed_rpm <= 0 or self.two_point_acceleration_rpm_s < 0
                 or self.two_point_deceleration_rpm_s < 0
+                or not self.center_controller.target_min_mm <= self.positive_drive_target_mm
+                <= self.center_controller.target_max_mm
                 or not 0 <= self.positive_reversal_min_mm <= self.positive_reversal_max_mm
                 or self.positive_reversal_velocity_mm_s < 0
                 or self.final_stable_window_mm <= 0 or self.final_stable_velocity_mm_s < 0
@@ -283,6 +289,8 @@ class RollerControlDaemon:
         if self.task == 2:
             self._update_two_point_sequence(now_s)
             target_mm = self.sequence_target_mm
+            if self.sequence_state == "TO_POSITIVE":
+                target_mm = self.positive_drive_target_mm
         else:
             target_mm = self.target_mm
         command = self.controller.step(target_mm, ball, tube_angle_deg,
@@ -334,6 +342,7 @@ class RollerControlDaemon:
         self.sequence_started_s = now_s
         self.sequence_target_mm = 50.0
         self.sequence_stable_since_s = None
+        self.controller = self.two_point_controller
         self.controller.reset()
         prefix = "自动确认：" if automatic else "已确认："
         self._announce(prefix + "开始计时，前往 +5cm。")
