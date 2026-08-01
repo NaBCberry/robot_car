@@ -10,6 +10,18 @@ can_interface="${CAN_INTERFACE:-can0}"
 can_bitrate="${CAN_BITRATE:-500000}"
 vision_pid=""
 vision_log_dir="${VISION_LOG_DIR:-/userdata/robot-car/logs}"
+vehicle_args=("$@")
+has_transport=false
+for arg in "${vehicle_args[@]}"; do
+    case "$arg" in
+        --transport|--transport=*)
+            has_transport=true
+            ;;
+    esac
+done
+if [[ "$has_transport" == false ]]; then
+    vehicle_args+=(--transport uart)
+fi
 mkdir -p "$vision_log_dir"
 
 configure_can() {
@@ -45,4 +57,4 @@ python3 -m robot_car.visiond --config-dir "$config_dir" \
     >"$vision_log_dir/visiond-console.log" 2>&1 &
 vision_pid=$!
 
-python3 -m robot_car.vehicled --config-dir "$config_dir" --tui "$@"
+python3 -m robot_car.vehicled --config-dir "$config_dir" --tui "${vehicle_args[@]}"
