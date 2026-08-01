@@ -16,8 +16,10 @@ class FakeRollerController:
     def __init__(self, *_args, **kwargs):
         self.task = kwargs["task"]
         self.target_mm = kwargs["target_mm"]
+        self.external_vision_events = kwargs["external_vision_events"]
         self.stop_event = threading.Event()
         self.feedforward = None
+        self.events = []
         type(self).instances.append(self)
 
     def run(self):
@@ -25,6 +27,9 @@ class FakeRollerController:
 
     def set_feedforward_mm_s2(self, value):
         self.feedforward = value
+
+    def submit_vision_event(self, event):
+        self.events.append(event)
 
 
 class VehicleDaemonDirectRollerTests(unittest.TestCase):
@@ -42,6 +47,11 @@ class VehicleDaemonDirectRollerTests(unittest.TestCase):
         daemon.request_action(ActionId.LINE_TO_B_BALANCE_CENTER, now_ms=1000)
         first = FakeRollerController.instances[-1]
         self.assertEqual((first.task, first.target_mm), (1, 0.0))
+        self.assertTrue(first.external_vision_events)
+        event = VisionEvent(1001, "roller_balance", "BALL_BALANCE_STATE", 0.95,
+                            {"error_mm": 12}, 1, 120, 1280, 720)
+        daemon._forward_direct_roller_event(event)
+        self.assertEqual(first.events, [event])
 
         daemon.request_action(ActionId.LINE_LAP_BALANCE_TARGET,
                               {"operation": "set"}, now_ms=1100)

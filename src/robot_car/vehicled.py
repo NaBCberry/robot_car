@@ -118,6 +118,7 @@ class VehicleDaemon:
                     self.state_machine.handle_event(event, now_ms)
                     self.control_arbiter.handle_event(event, now_ms)
                     self.action_dispatcher.handle_event(event, now_ms)
+                    self._forward_direct_roller_event(event)
                 while True:
                     request = self.gateway.receive_action_request()
                     if request is None:
@@ -256,13 +257,20 @@ class VehicleDaemon:
             controller = RollerControlDaemon(
                 self.config, control_config, armed=True, dry_run=False,
                 target_mm=target_mm, telemetry_hz=0, task=task,
-                auto_confirm=True, start_immediately=(task == 2), quiet=True)
+                auto_confirm=True, start_immediately=(task == 2), quiet=True,
+                external_vision_events=True)
             if task == 2:
                 self.action_dispatcher.set_direct_roller_progress("TO_POSITIVE", 50.0)
             self._roller_sweep = controller
             self._roller_sweep_thread = threading.Thread(target=self._run_roller_sweep,
                                                          name=f"roller-action-{int(action)}", daemon=True)
             self._roller_sweep_thread.start()
+
+    def _forward_direct_roller_event(self, event: Any) -> None:
+        """Feed vehicled's accepted vision stream to its direct CAN controller."""
+        controller = self._roller_sweep
+        if controller is not None:
+            controller.submit_vision_event(event)
 
     def _run_roller_sweep(self) -> None:
         controller = self._roller_sweep

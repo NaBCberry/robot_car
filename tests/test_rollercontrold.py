@@ -1,4 +1,5 @@
 import unittest
+from queue import Queue
 
 from robot_car.rollercontrold import RollerControlDaemon
 
@@ -49,6 +50,20 @@ class RollerControlDaemonTests(unittest.TestCase):
 
         self.assertEqual(daemon.actuator.hold_calls, 1)
         self.assertEqual(daemon.actuator.stop_calls, 0)
+
+    def test_external_vision_queue_keeps_only_the_latest_ball_event(self):
+        class Event:
+            def __init__(self, frame_id):
+                self.event_type = "BALL_BALANCE_STATE"
+                self.frame_id = frame_id
+
+        daemon = RollerControlDaemon.__new__(RollerControlDaemon)
+        daemon._external_vision_queue = Queue(maxsize=1)
+
+        daemon.submit_vision_event(Event(1))
+        daemon.submit_vision_event(Event(2))
+
+        self.assertEqual(daemon._external_vision_queue.get_nowait().frame_id, 2)
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import math
-from queue import Empty, Queue
+from queue import Empty, Full, Queue
 import signal
 import threading
 import time
@@ -36,7 +36,7 @@ class RollerControlDaemon:
                  dry_run: bool, target_mm: float | None, telemetry_hz: float,
                  task: int = 1, show_tx: bool = False, home: bool = False,
                  auto_confirm: bool = False, start_immediately: bool = False,
-                 quiet: bool = False) -> None:
+                 quiet: bool = False, external_vision_events: bool = False) -> None:
         self.app_config = app_config
         self.control_config = control_config
         self.armed = armed and bool(control_config.get("enabled", False))
@@ -45,6 +45,7 @@ class RollerControlDaemon:
         self.auto_confirm = auto_confirm
         self.start_immediately = start_immediately
         self.quiet = quiet
+        self.external_vision_events = external_vision_events
         self.stop_event = threading.Event()
         imu = control_config["imu"]
         motor = control_config["motor"]
@@ -99,7 +100,9 @@ class RollerControlDaemon:
         self.motor_home_status: int | None = None
         self.motor_status: int | None = None
         self.feedback_enabled = False
-        self.subscriber = VisionEventSubscriber(app_config["runtime"]["vision_socket"])
+        self._external_vision_queue = Queue(maxsize=1) if external_vision_events else None
+        self.subscriber = (None if external_vision_events else
+                           VisionEventSubscriber(app_config["runtime"]["vision_socket"]))
         self.ball: BallState | None = None
         self.received_ball_state = False
         self.reported_stale_ball_state = False
@@ -168,12 +171,21 @@ class RollerControlDaemon:
             if self.feedback_enabled:
                 self.actuator.configure_feedback("position", 0)
                 self.actuator.configure_feedback("home-and-status", 0)
-            self.subscriber.close()
+            if self.subscriber is not None:
+                self.subscriber.close()
             self.actuator.close()
             self.sensor.close()
 
     def _receive_event(self) -> None:
-        event = self.subscriber.receive(timeout=0.001)
+        if self._external_vision_queue is not None:
+            try:
+                event = self._external_vision_queue.get_nowait()
+            except Empty:
+                return
+        else:
+            if self.subscriber is None:
+                return
+            event = self.subscriber.receive(timeout=0.001)
         if event is None or event.event_type != "BALL_BALANCE_STATE":
             return
         now_ms = time.monotonic_ns() // 1_000_000
@@ -200,6 +212,30 @@ class RollerControlDaemon:
                 self._announce("已接收滚珠视觉数据，开始回中判定。")
         except (KeyError, TypeError, ValueError) as error:
             LOG.warning("ignored invalid ball state: %s", error)
+
+    def submit_vision_event(self, event: object) -> None:
+        """Supply the latest vehicled vision event to a direct controller.
+
+        Standalone roller control keeps its Unix-socket subscription.  The
+        high-level vehicle daemon calls this method only while it owns the
+        direct roller controller, and a one-slot queue prevents an old frame
+        from adding latency to the motor loop.
+        """
+        if self._external_vision_queue is None:
+            return
+        if getattr(event, "event_type", None) != "BALL_BALANCE_STATE":
+            return
+        try:
+            self._external_vision_queue.put_nowait(event)
+        except Full:
+            try:
+                self._external_vision_queue.get_nowait()
+            except Empty:
+                pass
+            try:
+                self._external_vision_queue.put_nowait(event)
+            except Full:
+                return
 
     def _control(self, now_s: float, tube_angle_deg: float) -> None:
         if (self.task == 2 and self.sequence_state in {"TO_POSITIVE", "TO_NEGATIVE"}
