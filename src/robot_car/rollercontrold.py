@@ -27,8 +27,10 @@ CENTER_CONFIRM_WINDOW_MM = 5.0
 CENTER_CONFIRM_HOLD_S = 2.1
 FINAL_STABLE_WINDOW_MM = 10.0
 FINAL_STABLE_VELOCITY_MM_S = 40.0
-POSITIVE_REVERSAL_WINDOW_MM = 6.0
-POSITIVE_REVERSAL_VELOCITY_MM_S = 20.0
+FINAL_STABLE_HOLD_S = 0.20
+POSITIVE_REVERSAL_MIN_MM = 40.0
+POSITIVE_REVERSAL_MAX_MM = 50.0
+POSITIVE_REVERSAL_VELOCITY_MM_S = 8.0
 
 
 class RollerControlDaemon:
@@ -66,7 +68,11 @@ class RollerControlDaemon:
             velocity_alpha=float(estimator.get("velocity_alpha", 0.35)),
             acceleration_alpha=float(estimator.get("acceleration_alpha", 0.20)),
             max_gap_ms=int(estimator.get("max_gap_ms", 250)))
-        self.controller = build_controller(control_config)
+        two_point = control_config.get("two_point", {})
+        if not isinstance(two_point, dict):
+            raise ValueError("roller two_point configuration must be a mapping")
+        self.two_point = two_point
+        self.controller = build_controller(control_config, pid_profile=two_point if task == 2 else None)
         self.actuator = Y42Actuator(interface=str(motor["can_interface"]),
                                     address=int(motor["address"]),
                                     firmware=str(motor.get("firmware", "x")),
@@ -78,6 +84,30 @@ class RollerControlDaemon:
         self.speed_rpm = float(motor["speed_rpm"])
         self.acceleration_rpm_s = int(motor["acceleration_rpm_s"])
         self.deceleration_rpm_s = int(motor["deceleration_rpm_s"])
+        self.two_point_speed_rpm = float(two_point.get("speed_rpm", self.speed_rpm))
+        self.two_point_acceleration_rpm_s = int(two_point.get("acceleration_rpm_s",
+                                                               self.acceleration_rpm_s))
+        self.two_point_deceleration_rpm_s = int(two_point.get("deceleration_rpm_s",
+                                                               self.deceleration_rpm_s))
+        self.positive_reversal_min_mm = float(two_point.get("positive_reversal_min_mm",
+                                                             POSITIVE_REVERSAL_MIN_MM))
+        self.positive_reversal_max_mm = float(two_point.get("positive_reversal_max_mm",
+                                                             POSITIVE_REVERSAL_MAX_MM))
+        self.positive_reversal_velocity_mm_s = float(two_point.get(
+            "positive_reversal_velocity_mm_s", POSITIVE_REVERSAL_VELOCITY_MM_S))
+        self.final_stable_window_mm = float(two_point.get("final_stable_window_mm",
+                                                           FINAL_STABLE_WINDOW_MM))
+        self.final_stable_velocity_mm_s = float(two_point.get("final_stable_velocity_mm_s",
+                                                               FINAL_STABLE_VELOCITY_MM_S))
+        self.final_stable_hold_s = float(two_point.get("final_stable_hold_s",
+                                                        FINAL_STABLE_HOLD_S))
+        if (self.two_point_speed_rpm <= 0 or self.two_point_acceleration_rpm_s < 0
+                or self.two_point_deceleration_rpm_s < 0
+                or not 0 <= self.positive_reversal_min_mm <= self.positive_reversal_max_mm
+                or self.positive_reversal_velocity_mm_s < 0
+                or self.final_stable_window_mm <= 0 or self.final_stable_velocity_mm_s < 0
+                or self.final_stable_hold_s < 0):
+            raise ValueError("roller two_point configuration is invalid")
         self.command_interval_s = 1.0 / float(motor.get("command_hz", 40))
         self.state_timeout_ms = int(control_config.get("state_timeout_ms", 120))
         self.target_mm = float(control_config.get("target_mm", 0) if target_mm is None else target_mm)
@@ -258,10 +288,18 @@ class RollerControlDaemon:
         command = self.controller.step(target_mm, ball, tube_angle_deg,
                                        self.command_interval_s,
                                        target_acceleration_mm_s2=self._feedforward())
+        if self.task == 2 and self.sequence_state in {"TO_POSITIVE", "TO_NEGATIVE"}:
+            speed_rpm = self.two_point_speed_rpm
+            acceleration_rpm_s = self.two_point_acceleration_rpm_s
+            deceleration_rpm_s = self.two_point_deceleration_rpm_s
+        else:
+            speed_rpm = self.speed_rpm
+            acceleration_rpm_s = self.acceleration_rpm_s
+            deceleration_rpm_s = self.deceleration_rpm_s
         if self.armed or self.dry_run:
-            self.actuator.move_absolute(command.target_motor_angle_deg, speed_rpm=self.speed_rpm,
-                                        acceleration_rpm_s=self.acceleration_rpm_s,
-                                        deceleration_rpm_s=self.deceleration_rpm_s)
+            self.actuator.move_absolute(command.target_motor_angle_deg, speed_rpm=speed_rpm,
+                                        acceleration_rpm_s=acceleration_rpm_s,
+                                        deceleration_rpm_s=deceleration_rpm_s)
         LOG.debug("ball=%.1f mm v=%.1f mm/s a=%.1f mm/s2 tube=%.2f deg target=%.2f deg motor=%.2f deg",
                   ball.position_mm, ball.velocity_mm_s, ball.acceleration_mm_s2, tube_angle_deg,
                   command.target_tube_angle_deg, command.target_motor_angle_deg)
@@ -311,8 +349,8 @@ class RollerControlDaemon:
             # center, not a velocity estimate that can be reset by one pixel.
             stable = abs(ball.position_mm) <= CENTER_CONFIRM_WINDOW_MM
         else:
-            stable = (abs(ball.position_mm - target) <= FINAL_STABLE_WINDOW_MM
-                      and abs(ball.velocity_mm_s) <= FINAL_STABLE_VELOCITY_MM_S)
+            stable = (abs(ball.position_mm - target) <= self.final_stable_window_mm
+                      and abs(ball.velocity_mm_s) <= self.final_stable_velocity_mm_s)
         if stable:
             if self.sequence_stable_since_s is None:
                 self.sequence_stable_since_s = now_s
@@ -351,14 +389,14 @@ class RollerControlDaemon:
                 return
             self._begin_two_point_sequence(now_s, automatic=False)
         elif (self.sequence_state == "TO_POSITIVE"
-              and (abs(ball.position_mm - self.sequence_target_mm) <= POSITIVE_REVERSAL_WINDOW_MM
-                   and abs(ball.velocity_mm_s) <= POSITIVE_REVERSAL_VELOCITY_MM_S)):
+              and self.positive_reversal_min_mm <= ball.position_mm <= self.positive_reversal_max_mm
+              and abs(ball.velocity_mm_s) <= self.positive_reversal_velocity_mm_s):
             self.sequence_state = "TO_NEGATIVE"
             self.sequence_target_mm = -50.0
             self.sequence_stable_since_s = None
             self.controller.reset()
-            self._announce("已到达 +5cm 且速度接近零，开始平滑返回 -5cm。")
-        elif self.sequence_state == "TO_NEGATIVE" and held_s >= 0.20:
+            self._announce("已到达 +4~+5cm 且速度接近零，开始平滑返回 -5cm。")
+        elif self.sequence_state == "TO_NEGATIVE" and held_s >= self.final_stable_hold_s:
             elapsed = 0.0 if self.sequence_started_s is None else now_s - self.sequence_started_s
             self.sequence_state = "COMPLETE"
             timeout_note = "（已超过5s）" if self.sequence_timed_out else ""

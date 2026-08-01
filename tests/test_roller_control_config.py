@@ -29,6 +29,21 @@ class RollerControlConfigTests(unittest.TestCase):
             build_controller({"motor": {"soft_limit_min_deg": -1, "soft_limit_max_deg": 1},
                               "control": {"limits": {}}})
 
+    def test_uses_two_point_pid_profile_without_changing_baseline(self):
+        config = configuration()
+        profile = {
+            "position_pid": {"kp": 2, "ki": 0, "kd": 0,
+                             "output_limit": 8, "integral_limit": 1},
+            "velocity_pid": {"kp": 3, "ki": 0, "kd": 0,
+                             "output_limit": 9, "integral_limit": 1},
+        }
+
+        controller = build_controller(config, pid_profile=profile)
+
+        self.assertEqual(controller.position_pid.parameters.kp, 2)
+        self.assertEqual(controller.velocity_pid.parameters.kp, 3)
+        self.assertEqual(controller.angle_pid.parameters.kp, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

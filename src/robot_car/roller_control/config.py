@@ -21,14 +21,17 @@ def load_roller_control(path: str | Path) -> dict[str, Any]:
     return config
 
 
-def build_controller(config: dict[str, Any]) -> RollerController:
+def build_controller(config: dict[str, Any], *, pid_profile: dict[str, Any] | None = None) -> RollerController:
     control = _require_mapping(config, "control")
     motor = _require_mapping(config, "motor")
     limits = _require_mapping(control, "limits")
+    profile = pid_profile or {}
+    if not isinstance(profile, dict):
+        raise ValueError("roller PID profile must be a mapping")
     return RollerController(
-        _pid(_require_mapping(control, "position_pid")),
-        _pid(_require_mapping(control, "velocity_pid")),
-        _pid(_require_mapping(control, "angle_pid")),
+        _pid(_pid_mapping(control, profile, "position_pid")),
+        _pid(_pid_mapping(control, profile, "velocity_pid")),
+        _pid(_pid_mapping(control, profile, "angle_pid")),
         LinearTable(control.get("slope_bias_deg_by_position", []), name="slope_bias_deg_by_position"),
         LinearTable(control.get("motor_deg_by_tube_angle", []), name="motor_deg_by_tube_angle"),
         target_min_mm=float(limits["target_min_mm"]), target_max_mm=float(limits["target_max_mm"]),
@@ -47,6 +50,13 @@ def _pid(value: dict[str, Any]) -> Pid:
     return Pid(PidParameters(kp=float(value["kp"]), ki=float(value["ki"]), kd=float(value["kd"]),
                              output_limit=float(value["output_limit"]),
                              integral_limit=float(value["integral_limit"])))
+
+
+def _pid_mapping(control: dict[str, Any], profile: dict[str, Any], key: str) -> dict[str, Any]:
+    value = profile.get(key, control.get(key))
+    if not isinstance(value, dict):
+        raise ValueError(f"roller control {key} must be a mapping")
+    return value
 
 
 def _require_mapping(value: dict[str, Any], key: str) -> dict[str, Any]:
