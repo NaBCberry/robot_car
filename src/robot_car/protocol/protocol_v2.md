@@ -53,7 +53,7 @@ UART 帧以固定两字节帧头 `0xA5 0x5A` 开始，**没有帧尾，也不使
   "payload": {
     "action_id": 6,
     "request_id": 128,
-    "parameters": {"target_mm": 35, "timeout_ms": 30000}
+    "parameters": {"operation": "set"}
   },
   "valid_for_ms": 1000
 }
@@ -90,19 +90,64 @@ JSON 必须使用紧凑 UTF-8 编码，整个 `CMD_EVENT.payload`（包括 JSON 
 | `3` | 题3 | 可选 `positive_mm`（默认 50）、`timeout_ms`（默认 5000） | 钢球从中心到正向位置，再回中心，最后到负向位置并稳定 |
 | `4` | 题4 | 可选 `timeout_ms`（默认 8000） | M0 巡线到 B；RDK 直接 CAN 控制滚珠保持中心（`target_mm=0`） |
 | `5` | 题5 | 可选 `timeout_ms`（默认 30000） | M0 巡线一圈；RDK 直接 CAN 控制滚珠保持中心（`target_mm=0`） |
-| `6` | 题6 | **`target_mm` 必填**；可选 `timeout_ms`（默认 30000） | M0 巡线一圈；RDK 直接 CAN 控制滚珠保持启动时指定位置 |
+| `6` | 题6 | 必填 `operation`：`set` 或 `run`，见下节 | 分两步锁定钢球当前位置并执行指定位置巡线 |
 
-`target_mm` 和 `positive_mm` 的单位均为 mm，中心 O 为 `0`，正负方向必须与
+`positive_mm`、动作 6 回传的 `target_mm` 单位均为 mm，中心 O 为 `0`，正负方向必须与
 `camera.yaml` 和 MSPM0 的标定方向一致。`timeout_ms` 单位为 ms，必须为正整数。
 动作 4 和动作 5 在 RDK 侧都使用滚珠中心平衡规则，区别仅在于巡线路径和完成检查点；
 动作 6 才使用 `LINE_LAP_BALANCE_TARGET` 的指定位置规则。
 
-动作 6 的完整请求示例：
+#### 2.1 题 6：锁定目标位置（`6set`）
+
+下位机先发送 `operation="set"`。RDK 不使用该请求前已缓存的视觉数据，而是等待请求到达
+后的**下一帧**未过期 `BALL_BALANCE_STATE`，将其中的 `error_mm` 以 0.1 mm 精度保存为
+`target_mm`。此操作不启动 Y42 控制、不要求巡线；重复执行会原子覆盖上一次保存的目标。
 
 ```json
 {"event_type":"ACTION_REQUEST","payload":{"action_id":6,"request_id":128,
-"parameters":{"target_mm":35,"timeout_ms":30000}},"valid_for_ms":1000}
+"parameters":{"operation":"set"}},"valid_for_ms":1000}
 ```
+
+RDK 先回复帧级 ACK，视觉捕获完成后再发送以下 `ACTION_STATUS`。`request_id` 用于将该状态
+与本次 `set` 请求关联，`target_revision` 每次成功覆盖目标后递增（`1`-`65535`，回绕后为 `1`）。
+
+```json
+{"event_type":"ACTION_STATUS","payload":{"action_id":6,"status":"COMPLETE",
+"reason":"target_saved","target_mm":32.4,"target_revision":7,
+"request_id":128},"valid_for_ms":1000}
+```
+
+默认捕获等待时间为 500 ms。视觉帧超时、钢球丢失或位置超出协议坐标范围
+`[-1000.0, 1000.0] mm` 时，RDK 回传
+`status="FAILED"`、`reason="target_capture_timeout"` 或 `"target_out_of_range"`，并保留
+此前已成功保存的目标。
+
+#### 2.2 题 6：按已锁定目标运行（`6run`）
+
+仅在收到成功 `6set` 的状态后，使用其中的 `target_revision` 发送 `operation="run"`。RDK 以
+已保存的 `target_mm` 启动题 6：MSPM0 按题 5 的方式巡线，RDK 独占 Y42 直接 CAN 摆杆控制，
+并继续使用遥测中的 `roller_feedforward_mm_s2` 前馈。
+
+```json
+{"event_type":"ACTION_REQUEST","payload":{"action_id":6,"request_id":129,
+"parameters":{"operation":"run","target_revision":7,"timeout_ms":30000}},"valid_for_ms":1000}
+```
+
+`6run` 不允许携带或覆盖 `target_mm`。未完成 `6set` 时 RDK 拒绝运行并报告
+`target_not_set`；版本号不等于当前保存版本时报告 `target_revision_mismatch`。这可以避免
+延迟的旧 `run` 报文以错误目标启动控制。`action_id=0` 停止当前 `run`，但不清除已锁定目标；
+目标仅由下一次成功 `6set` 覆盖或在 RDK 进程重启后清空。
+
+#### 2.3 `ACTION_STATUS` 的动作关联字段
+
+RDK 以 `CMD_EVENT` 回传 `event_type="ACTION_STATUS"`，其中 `payload.action_id` 始终是正在
+报告或刚结束的动作编号。对于下位机发起的动作，`payload.request_id` 回显该请求的
+`request_id`。动作 6 额外包含 `target_mm` 和 `target_revision`，M0 必须使用成功 `set` 回传的
+版本号启动 `run`，而不能假设之前的目标仍有效。
+
+为保证外层 JSON 不超过 255 字节，`ACTION_STATUS.payload` 只传输以下字段：
+`action_id`、`status`、`target_mm`、`target_revision`、`request_id` 和 `reason`。`reason`
+最多 48 个 UTF-8 字节；`phase`、来源、上一次动作号和实时钢球误差仅供 RDK 本地 TUI 使用。
 
 停止请求示例：
 
@@ -111,7 +156,7 @@ JSON 必须使用紧凑 UTF-8 编码，整个 `CMD_EVENT.payload`（包括 JSON 
 "parameters":{}},"valid_for_ms":1000}
 ```
 
-#### 2.1 摆杆步进电机回零（`action_id=1`）
+#### 2.4 摆杆步进电机回零（`action_id=1`）
 
 下位机需要让 RDK 控制摆杆步进电机回到机械绝对零点时，发送动作 `1`。下位机**不得**
 把 Y42 CAN 帧透传到 UART，也不得自行把当前位置写成零点；绝对零点由电机已有的参数
