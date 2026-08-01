@@ -140,7 +140,7 @@ class Y42ActuatorTests(unittest.TestCase):
         self.assertEqual((calls[0].command, calls[0].direction, calls[0].position, calls[0].mode),
                          ("position", "ccw", 320, "relative-target"))
 
-    def test_repeats_function_code_for_multiframe_emm_position(self):
+    def test_repeats_code_for_multiframe_emm_position(self):
         sent = []
         payload = bytes((0xFD, 0x01, 0x00, 0x05, 0x1E, 0x00, 0x00, 0x01,
                          0x03, 0x00, 0x00, 0x6B))
@@ -154,8 +154,9 @@ class Y42ActuatorTests(unittest.TestCase):
         actuator.move_relative_target(1, speed_rpm=5, acceleration_rpm_s=30,
                                       deceleration_rpm_s=30)
 
-        self.assertEqual(sent[0][-1], True)
-        self.assertEqual(frames_for(1, payload, repeat_code=sent[0][-1]), (
+        self.assertEqual(len(sent[0]), 5)
+        self.assertTrue(sent[0][4])
+        self.assertEqual(frames_for(1, payload, repeat_code=True), (
             (0x100, payload[:8]),
             (0x101, bytes((0xFD, 0x03, 0x00, 0x00, 0x6B))),
         ))

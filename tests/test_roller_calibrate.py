@@ -1,7 +1,8 @@
 import unittest
 from unittest.mock import patch
 
-from robot_car.roller_calibrate import finish_calibration, invert_crank_samples, soft_limits_from_points
+from robot_car.roller_calibrate import (finish_calibration, invert_crank_samples,
+                                        soft_limits_from_points, wait_for_target_position)
 
 
 class FinishingActuator:
@@ -13,6 +14,21 @@ class FinishingActuator:
 
     def enable(self):
         self.calls.append("enable")
+
+
+class TargetActuator:
+    def __init__(self, targets, status=0x01):
+        self.targets = iter(targets)
+        self.status = status
+
+    def read_target_position_deg(self, timeout_s):
+        value = next(self.targets)
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    def read_motor_status(self, timeout_s):
+        return self.status
 
 
 class RollerCalibrationTests(unittest.TestCase):
@@ -42,3 +58,14 @@ class RollerCalibrationTests(unittest.TestCase):
             self.assertTrue(finish_calibration(actuator, (-10, 10)))
 
         self.assertEqual(actuator.calls, ["enable"])
+
+    def test_waits_for_emm_target_register_to_update(self):
+        actuator = TargetActuator((0.055, -33.525))
+
+        self.assertEqual(wait_for_target_position(actuator, -33.541), -33.525)
+
+    def test_target_register_timeout_reports_last_readback_and_status(self):
+        actuator = TargetActuator((RuntimeError("timed out reading Y42 motor state"),))
+
+        with self.assertRaisesRegex(RuntimeError, "last target unavailable, status 0x01"):
+            wait_for_target_position(actuator, 5, timeout_s=0.001)

@@ -120,14 +120,16 @@ class Y42Actuator:
         return bounded_angle
 
     def move_relative_target(self, motor_angle_deg: float, *, speed_rpm: float,
-                             acceleration_rpm_s: int, deceleration_rpm_s: int) -> None:
+                             acceleration_rpm_s: int, deceleration_rpm_s: int,
+                             confirm: bool = False, confirm_timeout_s: float = 2.0) -> None:
         if speed_rpm <= 0 or acceleration_rpm_s < 0 or deceleration_rpm_s < 0:
             raise ValueError("Y42 position parameters are invalid")
         if self.firmware != "emm":
             raise RuntimeError("relative-target calibration is only supported for EMM firmware")
         self._send("position", direction="cw" if motor_angle_deg >= 0 else "ccw", speed=speed_rpm,
                    acceleration=acceleration_rpm_s,
-                   position=self._degrees_to_pulses(abs(motor_angle_deg)), mode="relative-target")
+                   position=self._degrees_to_pulses(abs(motor_angle_deg)), mode="relative-target",
+                   confirm=confirm, confirm_timeout_s=confirm_timeout_s)
 
     def home_absolute_zero(self, *, wait: bool = False, confirm: bool = False,
                            timeout_s: float = 30.0) -> float | None:
@@ -233,9 +235,8 @@ class Y42Actuator:
         arguments = SimpleNamespace(command=command, address=self.address, firmware=self.firmware,
                                     sync=False, **kwargs)
         address, payload = self.payload_builder(arguments)
-        # EMM position commands exceed one CAN frame. The motor requires the
-        # function byte (FD) at the start of every continuation frame.
-        self.payload_sender(self.driver, address, payload, self.packet_gap_ms, len(payload) > 8)
+        self.payload_sender(self.driver, address, payload, self.packet_gap_ms,
+                            len(payload) > 8)
         if confirm:
             self._confirm_command(payload[0], timeout_s=confirm_timeout_s)
 

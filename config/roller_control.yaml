@@ -19,10 +19,10 @@ imu:
   slope_accel_sign: 1
   gravity_accel_sign: 1
   gyro_sign: 1
-  # Set this to the raw pitch reported while the pipe is at its mechanical zero.
-  pitch_zero_offset_deg: 1.422
-  # Set this to the selected gyro-axis average while the pipe is stationary.
-  gyro_bias_raw: 113.470
+  # Static baseline captured at the mechanical zero position.
+  pitch_zero_offset_deg: 2.043
+  # Static gyro-axis bias captured with the mechanism stationary.
+  gyro_bias_raw: 134.730
   # Single-axis Mahony PI gravity correction. Ki stays disabled until dynamic tuning.
   mahony_kp: 8.0
   mahony_ki: 0.0
@@ -43,8 +43,8 @@ motor:
   deceleration_rpm_s: 100
   # The prior measurements used X-firmware scaling and must not drive this EMM motor.
   soft_limit_firmware: emm
-  soft_limit_min_deg: -30.937
-  soft_limit_max_deg: 46.120
+  soft_limit_min_deg: -33.277
+  soft_limit_max_deg: 52.536
   # Display-only ratio: raw Y42 multi-turn degrees / output-shaft degrees.
   position_deg_per_output_deg: 1.0
 
@@ -93,19 +93,18 @@ control:
     target_max_mm: 115
     tube_angle_min_deg: -8
     tube_angle_max_deg: 8
-  # Lower outer-loop gain to avoid commanding the full tube angle before the motor catches up.
-  position_pid: {kp: 2.0, ki: 0.20, kd: 0.0, output_limit: 55.0, integral_limit: 20.0}
-  # Limit requested acceleration while characterizing the motor/pipe delay.
-  velocity_pid: {kp: 6.0, ki: 0.0, kd: 0.0, output_limit: 600.0, integral_limit: 200.0}
+  # Baseline tuned from a freshly calibrated IMU; angle feedback remains disabled.
+  position_pid: {kp: 0.90, ki: 0.25, kd: 0.0, output_limit: 55.0, integral_limit: 20.0}
+  velocity_pid: {kp: 6.00, ki: 0.0, kd: 0.0, output_limit: 400.0, integral_limit: 200.0}
   # Angle feedback is deliberately limited while the motor response is being characterized.
-  angle_pid: {kp: 0.4, ki: 0.0, kd: 0.0, output_limit: 3.0, integral_limit: 10.0}
+  angle_pid: {kp: 0.0, ki: 0.0, kd: 0.0, output_limit: 3.0, integral_limit: 10.0}
   feedforward:
     # Disabled until a calibrated vehicle acceleration source is available.
     enabled: true
     source: vehicle_motion
     gain: 0.0
     limit_mm_s2: 0.0
-  # Temporary local breakaway compensation around the measured +10 mm equilibrium.
-  slope_bias_deg_by_position: [[-115, 0], [0, 0], [10, 0.25], [20, 0], [115, 0]]
+  # No static-slope compensation during the initial PID baseline measurement.
+  slope_bias_deg_by_position: [[-115, 0], [115, 0]]
   # Measured crank inverse map: pipe angle (deg) -> Y42 absolute motor angle (deg).
   motor_deg_by_tube_angle: [[-5.793, -30.927], [-5.317, -27.664], [-4.793, -24.521], [-4.246, -21.248], [-3.658, -18.116], [-3.067, -14.848], [-2.412, -11.7], [-1.76, -8.432], [-1.106, -5.279], [-0.368, -2.027], [0.38, 1.121], [1.171, 4.395], [1.982, 7.646], [2.804, 10.8], [3.615, 14.073], [4.43, 17.227], [5.263, 20.468], [6.076, 23.621], [6.876, 26.884], [7.67, 30.026], [8.412, 33.311], [9.139, 36.464], [9.85, 39.705], [10.473, 42.88], [11.124, 46.121]]

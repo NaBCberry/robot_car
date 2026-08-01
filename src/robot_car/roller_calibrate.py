@@ -131,6 +131,43 @@ def wait_for_position(actuator: Y42Actuator, target_deg: float, timeout_s: float
         target_deg, last_position, status))
 
 
+def wait_for_target_position(actuator: Y42Actuator, target_deg: float,
+                             timeout_s: float = 2.0) -> float:
+    """Wait until the EMM input-target register reflects a position command.
+
+    Some Y42 response modes do not return an ``FD 02`` acknowledgement for
+    position commands.  Reading 0x33 gives a controller-state confirmation
+    without relying on that optional asynchronous response.
+    """
+    if timeout_s <= 0:
+        raise ValueError("target position timeout must be positive")
+    deadline = time.monotonic() + timeout_s
+    last_target = None
+    last_error = None
+    while time.monotonic() < deadline:
+        remaining = deadline - time.monotonic()
+        try:
+            target = actuator.read_target_position_deg(timeout_s=min(0.25, remaining))
+        except RuntimeError as error:
+            last_error = error
+        else:
+            last_target = target
+            # The EMM command unit is a microstep.  One degree leaves ample
+            # room for the configured pulse resolution and readback rounding.
+            if abs(target - target_deg) <= 1.0:
+                return target
+        time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
+    try:
+        status = actuator.read_motor_status(timeout_s=0.25)
+        status_text = "0x%02X" % status
+    except RuntimeError:
+        status_text = "unavailable"
+    target_text = "unavailable" if last_target is None else "%.3f°" % last_target
+    detail = "" if last_error is None else "; last read: %s" % last_error
+    raise RuntimeError("Y42 did not update target to %.3f°; last target %s, status %s%s" % (
+        target_deg, target_text, status_text, detail))
+
+
 def wait_for_absolute_home(actuator: Y42Actuator, timeout_s: float = 30.0) -> float:
     deadline = time.monotonic() + timeout_s
     saw_active = False
@@ -235,19 +272,18 @@ def calibrate_crank(args: argparse.Namespace, config: dict, path: Path) -> int:
         if motor_status & 0x08:
             raise RuntimeError("Y42 stall protection is active (status 0x%02X)" % motor_status)
         current = actuator.read_position_deg()
-        previous_target = actuator.read_target_position_deg() if actuator.firmware == "emm" else current
         for target in targets:
             print("移动至电机 %.3f°" % target)
             movement_timeout_s = max(5.0, abs(target - current) / (args.speed_rpm * 6.0) + 5.0)
             if actuator.firmware == "emm":
-                actuator.move_relative_target(target - previous_target, speed_rpm=args.speed_rpm,
-                                             acceleration_rpm_s=args.acceleration_rpm_s,
-                                             deceleration_rpm_s=args.deceleration_rpm_s)
-                accepted_target = actuator.read_target_position_deg()
-                if abs(accepted_target - target) > 1.0:
-                    raise RuntimeError("Y42 did not accept %.3f°; target is %.3f°" % (
-                        target, accepted_target))
-                previous_target = accepted_target
+                # A calibration map is expressed in the Y42 coordinate system,
+                # so command the coordinate itself.  Mode 0 (relative to the
+                # previous input target) can inherit an old target from before
+                # calibration and send the mechanism far beyond its safe span.
+                actuator.move_absolute(target, speed_rpm=args.speed_rpm,
+                                       acceleration_rpm_s=args.acceleration_rpm_s,
+                                       deceleration_rpm_s=args.deceleration_rpm_s)
+                wait_for_target_position(actuator, target)
             else:
                 actuator.move_to_coordinate(target, current_angle_deg=current, speed_rpm=args.speed_rpm,
                                             acceleration_rpm_s=args.acceleration_rpm_s,
