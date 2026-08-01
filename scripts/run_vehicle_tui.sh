@@ -57,4 +57,4 @@ python3 -m robot_car.visiond --config-dir "$config_dir" \
     >"$vision_log_dir/visiond-console.log" 2>&1 &
 vision_pid=$!
 
-python3 -m robot_car.vehicled --config-dir "$config_dir" --tui "${vehicle_args[@]}"
+python3 -m robot_car.vehicled --config-dir "$config_dir" --tui --tui-log-only "${vehicle_args[@]}"

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import curses
+from collections import deque
+import logging
 import time
 from typing import Any, Dict
 
@@ -28,41 +30,78 @@ ACTION_TASKS = {
 }
 
 
-def run_vehicle_tui(daemon: Any, roller_config: Dict[str, Any] | None = None) -> None:
+class TuiLogHandler(logging.Handler):
+    """Keep recent process logs available to the read-only curses view."""
+
+    def __init__(self, capacity: int = 200) -> None:
+        super().__init__()
+        self.lines: deque[str] = deque(maxlen=capacity)
+        self.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            self.lines.extend(self.format(record).splitlines() or [""])
+        except Exception:
+            self.handleError(record)
+
+    def snapshot(self) -> tuple[str, ...]:
+        self.acquire()
+        try:
+            return tuple(self.lines)
+        finally:
+            self.release()
+
+
+def run_vehicle_tui(daemon: Any, roller_config: Dict[str, Any] | None = None,
+                    *, log_only: bool = False) -> None:
     """Run the interactive selector while the daemon control loop runs in a thread."""
-    curses.wrapper(_main, daemon, roller_config or {})
+    handler = TuiLogHandler() if log_only else None
+    root_logger = logging.getLogger()
+    if handler is not None:
+        root_logger.addHandler(handler)
+    try:
+        curses.wrapper(_main, daemon, roller_config or {}, handler)
+    finally:
+        if handler is not None:
+            root_logger.removeHandler(handler)
+            handler.close()
 
 
-def _main(screen: Any, daemon: Any, roller_config: Dict[str, Any]) -> None:
+def _main(screen: Any, daemon: Any, roller_config: Dict[str, Any],
+          log_handler: TuiLogHandler | None = None) -> None:
     screen.nodelay(True)
     screen.keypad(True)
     curses.curs_set(0)
     input_buffer = ""
     while not daemon.stop_event.is_set():
         key = screen.getch()
-        if key in (ord("q"), ord("Q")):
-            daemon.request_action(0, source="tui")
-            daemon.stop_event.set()
-            break
-        if key in (ord("s"), ord("S"), 27):
-            daemon.request_action(0, source="tui")
-            input_buffer = ""
-        elif key in (10, 13):
-            if input_buffer:
-                try:
-                    daemon.request_action(int(input_buffer), source="tui")
-                except (TypeError, ValueError) as error:
-                    daemon.set_ui_error(str(error))
+        if log_handler is None:
+            if key in (ord("q"), ord("Q")):
+                daemon.request_action(0, source="tui")
+                daemon.stop_event.set()
+                break
+            if key in (ord("s"), ord("S"), 27):
+                daemon.request_action(0, source="tui")
                 input_buffer = ""
-        elif key == curses.KEY_BACKSPACE or key in (8, 127):
-            input_buffer = input_buffer[:-1]
-        elif 48 <= key <= 57 and len(input_buffer) < 3:
-            input_buffer += chr(key)
-        _draw(screen, daemon, roller_config, input_buffer)
+            elif key in (10, 13):
+                if input_buffer:
+                    try:
+                        daemon.request_action(int(input_buffer), source="tui")
+                    except (TypeError, ValueError) as error:
+                        daemon.set_ui_error(str(error))
+                    input_buffer = ""
+            elif key == curses.KEY_BACKSPACE or key in (8, 127):
+                input_buffer = input_buffer[:-1]
+            elif 48 <= key <= 57 and len(input_buffer) < 3:
+                input_buffer += chr(key)
+        _draw(screen, daemon, roller_config, input_buffer,
+              log_only=log_handler is not None,
+              log_lines=() if log_handler is None else log_handler.snapshot())
         time.sleep(0.05)
 
 
-def _draw(screen: Any, daemon: Any, roller_config: Dict[str, Any], input_buffer: str) -> None:
+def _draw(screen: Any, daemon: Any, roller_config: Dict[str, Any], input_buffer: str,
+          *, log_only: bool = False, log_lines: tuple[str, ...] = ()) -> None:
     screen.erase()
     snapshot = daemon.ui_snapshot()
     action = snapshot["action"]
@@ -70,14 +109,27 @@ def _draw(screen: Any, daemon: Any, roller_config: Dict[str, Any], input_buffer:
     pid = control.get("position_pid", {})
     vel = control.get("velocity_pid", {})
     angle = control.get("angle_pid", {})
+    action_id = action.get("action_id")
+    remote_action_id = action.get("last_remote_action_id")
+    active_action = "-" if action_id is None else str(action_id)
+    remote_action = "-" if remote_action_id is None else str(remote_action_id)
     screen.addnstr(0, 0, "RDK vehicle control TUI", max(1, curses.COLS - 1))
     status = (f"PID p={_pid(pid)} v={_pid(vel)} a={_pid(angle)} | "
-              f"当前动作={action.get('action_id') or '-'}({ACTION_NAMES.get(action.get('action_id'), '-')}) "
+              f"当前动作={active_action}({ACTION_NAMES.get(action_id, '-')}) "
               f"状态={action.get('status')} 阶段={action.get('phase') or '-'} | "
-              f"下位机动作={action.get('last_remote_action_id') or '-'} | "
+              f"下位机动作={remote_action} | "
               f"球误差={_number(action.get('ball_error_mm'))}mm | "
               f"UART RX={snapshot['gateway']['received']} ACK={snapshot['gateway']['acks']}")
     screen.addnstr(1, 0, status, max(1, curses.COLS - 1))
+    if log_only:
+        screen.addnstr(3, 0, "实时日志（只读；按 Ctrl-C 退出）", max(1, curses.COLS - 1))
+        first_row = 4
+        available_rows = max(0, curses.LINES - first_row)
+        display_lines = log_lines[-available_rows:] or ("等待日志...",)
+        for offset, line in enumerate(display_lines):
+            screen.addnstr(first_row + offset, 0, line, max(1, curses.COLS - 1))
+        screen.refresh()
+        return
     screen.addnstr(3, 0, f"动作映射: 0{ACTION_TASKS[0]} | 1{ACTION_TASKS[1]} | {ACTION_TASKS[2]}",
                    max(1, curses.COLS - 1))
     screen.addnstr(4, 0, f"动作映射: {ACTION_TASKS[3]} | {ACTION_TASKS[4]} | {ACTION_TASKS[5]} | {ACTION_TASKS[6]}",

@@ -409,12 +409,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config-dir", default="config")
     parser.add_argument("--transport", choices=("fake", "uart", "can"), default=None)
     parser.add_argument("--tui", action="store_true", help="run the curses action selector")
+    parser.add_argument("--tui-log-only", action="store_true",
+                        help="show a read-only status and log TUI; requires --tui")
     parser.add_argument("--quiet", action="store_true", help="suppress informational console logging")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
+    if args.tui_log_only and not args.tui:
+        raise SystemExit("--tui-log-only requires --tui")
     try:
         config = load_config(args.config_dir)
         paths = ensure_runtime_dirs(config)
@@ -441,7 +445,7 @@ def main() -> int:
         worker = threading.Thread(target=daemon.run, name="vehicled-control", daemon=True)
         worker.start()
         try:
-            run_vehicle_tui(daemon, roller_config)
+            run_vehicle_tui(daemon, roller_config, log_only=args.tui_log_only)
         finally:
             daemon.stop_event.set()
             worker.join(timeout=3.0)
