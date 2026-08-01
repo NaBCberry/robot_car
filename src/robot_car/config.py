@@ -171,8 +171,8 @@ def _validate_safe(config: Dict[str, Any]) -> None:
         raise ValueError("vehicle.status_led.enabled must be a YAML boolean")
     if not 1 <= int(status_led.get("count", 0)) <= 1024:
         raise ValueError("vehicle.status_led.count must be between 1 and 1024")
-    if not 0 < float(status_led.get("brightness", 0)) <= 0.10:
-        raise ValueError("vehicle.status_led.brightness must be between 0 and 0.10")
+    if not 0 < float(status_led.get("brightness", 0)) <= 1.0:
+        raise ValueError("vehicle.status_led.brightness must be between 0 and 1.0")
     if not 1 <= float(status_led.get("refresh_hz", 0)) <= 30:
         raise ValueError("vehicle.status_led.refresh_hz must be between 1 and 30")
     actions = vehicle.get("actions", {})
